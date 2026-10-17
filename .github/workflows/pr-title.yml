@@ -1,0 +1,23 @@
+name: Conventional PR title
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+permissions: {}
+
+jobs:
+  title:
+    name: Conventional PR title
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/github-script@v8
+        with:
+          script: |
+            const title = context.payload.pull_request.title;
+            const pattern = /^(feat|fix|perf|revert|docs|style|refactor|test|build|ci|chore)(\([^()\r\n]+\))?!?: \S[^\r\n]*$/;
+            if (!pattern.test(title)) {
+              core.setFailed('Use a Conventional Commit PR title, e.g. "fix: preserve paused project", "feat: add report" or "feat!: change storage format". Squash-merge using this title.');
+            }
