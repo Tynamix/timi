@@ -173,9 +173,11 @@ test('corrupted runtime JSON is refused and preserved', t => {
 
 test('an actual SIGKILL preserves WAL checkpoints and recovers uncertainty without closed-app time', t => {
   const path = databasePath(t);
-  const child = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', `
-    import { SqliteStore } from './src/core/store.ts';
-    import { TrackingApplication } from './src/core/application.ts';
+  // The project is CommonJS; explicit require avoids Node 24 treating tsx's
+  // transformed TypeScript as a native ESM module in this standalone child.
+  const child = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=commonjs', '-e', `
+    const { SqliteStore } = require('./src/core/store.ts');
+    const { TrackingApplication } = require('./src/core/application.ts');
     let now = ${BASE};
     const store = new SqliteStore(process.env.TIMI_CRASH_DATABASE);
     const app = new TrackingApplication(store, () => now);

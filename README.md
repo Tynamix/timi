@@ -4,7 +4,11 @@ A local, offline menu-bar time tracker for macOS 13 or later. Electron, TypeScri
 
 ## Install and run
 
-Use Node.js 22.13 or later and macOS with Xcode Command Line Tools. Development and packaging download dependencies; the installed application works offline.
+Download [timi for macOS (Apple Silicon + Intel)](https://github.com/Tynamix/timi/releases/latest/download/timi-mac-universal.zip) from [GitHub Releases](https://github.com/Tynamix/timi/releases/latest), unzip it, and drag **timi.app** into Applications. Requires macOS 13 or later. Downloads become available after the first successful automated release.
+
+The download is ad-hoc signed, without Apple notarization. If macOS blocks the first launch, use **System Settings → Privacy & Security → Open Anyway**. Each release includes `SHA256SUMS`; download it beside the ZIP and run `shasum -a 256 -c SHA256SUMS` to verify the archive.
+
+To run from source, use Node.js 22.14 or later and macOS with Xcode Command Line Tools. CI uses Node.js 24.10. Development and packaging download dependencies; the installed application works offline.
 
 ```sh
 npm ci
@@ -46,6 +50,12 @@ TIMI_TEST_EXECUTABLE="$PWD/release/timi-darwin-arm64/timi.app/Contents/MacOS/tim
 ```
 
 The core tests use controlled clocks, real isolated SQLite files, failures and retries, recovery, migration, midnight/week changes, and DST in Europe/Berlin and America/New_York. Native smoke tests run actual Electron windows with isolated data directories; lock/sleep signals and time advancement are injected. Screenshots and the recorded native-check limits are described in [verification](docs/verification.md).
+
+## Pull requests and releases
+
+Every pull request targeting `main` runs type checking, unit tests and the build on Linux and macOS. AI reviews use the native Codex GitHub integration, enabled in Codex repository settings. Review guidance lives in [AGENTS.md](AGENTS.md); no AI credentials are needed in GitHub Actions. See [automation setup](docs/automation.md) for review configuration and repository settings.
+
+Use Conventional Commit PR titles and squash-merge with that title: `fix: …` creates a patch release, `feat: …` a minor release, and `feat!: …` or a `BREAKING CHANGE:` footer a major release. Documentation, CI and other maintenance-only changes do not create a release. After merges to `main`, successful Linux and macOS checks allow semantic-release to publish a version tag, release notes, a universal macOS ZIP and its checksum. Version metadata is set before packaging; versions are not committed back to `main`. See [automation setup](docs/automation.md) for the recommended branch rules and first-release behavior.
 
 ## Data and recovery
 
