@@ -1,80 +1,153 @@
+<div align="center">
+
+<img src="assets/timi.png" alt="timi app icon" width="104" height="104">
+
 # timi
 
-A local, offline menu-bar time tracker for macOS 13 or later. Electron, TypeScript, plain HTML/CSS, and SQLite. MIT licensed. No accounts, synchronization, analytics, remote assets, or runtime network requests.
+### Your time. Your Mac. Your business.
 
-## Install and run
+A private menu-bar time tracker for macOS that reminds you to start and asks how time away should count.
 
-Download [timi for macOS (Apple Silicon + Intel)](https://github.com/Tynamix/timi/releases/latest/download/timi-mac-universal.zip) from [GitHub Releases](https://github.com/Tynamix/timi/releases/latest), unzip it, and drag **timi.app** into Applications. Requires macOS 13 or later. Downloads become available after the first successful automated release.
+**No account. No subscription. No cloud. Just your time.**
 
-The download is ad-hoc signed, without Apple notarization. If macOS blocks the first launch, use **System Settings → Privacy & Security → Open Anyway**. Each release includes `SHA256SUMS`; download it beside the ZIP and run `shasum -a 256 -c SHA256SUMS` to verify the archive.
+[![macOS 13+](https://img.shields.io/badge/macOS-13%2B-214f45?style=flat-square)](https://github.com/Tynamix/timi/releases/latest)
+[![Apple Silicon & Intel](https://img.shields.io/badge/Apple_Silicon_%26_Intel-universal-214f45?style=flat-square)](https://github.com/Tynamix/timi/releases/latest)
+[![MIT license](https://img.shields.io/badge/license-MIT-214f45?style=flat-square)](LICENSE)
 
-To run from source, use Node.js 22.14 or later and macOS with Xcode Command Line Tools. CI uses Node.js 24.10. Development and packaging download dependencies; the installed application works offline.
+**[Download for macOS](https://github.com/Tynamix/timi/releases/latest/download/timi-mac-universal.zip)** · [What makes timi different](#why-timi) · [Get started](#get-started) · [Contribute](#contribute)
+
+</div>
+
+<p align="center">
+  <img src="docs/images/hero.png" alt="timi showing a project running in the compact tracking window alongside a weekly overview with daily project totals" width="100%">
+</p>
+
+timi helps you keep track through the interruptions of a real working day. When you're working without a timer, it reminds you to choose a project. When you step away, lock your Mac, or put it to sleep, it sets that time aside for you to review on return. A meeting can still count as work; a coffee break can stay a break. You decide, and your week stays easy to understand.
+
+## Why timi?
+
+**Step away. Come back. Decide.** During project tracking, timi notices inactivity, screen locking, and sleep. When you return, one question lets you record the time as work on your previous project, record it as a break, or discard it. For inactivity, this covers the entire interval since your last activity. The interval continues until you decide, then your previous project resumes unless you stopped tracking. Time away stays out of your working total until you've classified it.
+
+**A reminder when you forget to start.** It's easy to get straight into work and forget the timer. After 10 minutes of active use without tracking, timi offers to start a project, remind you later, or begin a break. Tracking starts from your choice; missing time can be added separately. You can adjust the reminder and inactivity thresholds independently, and manual breaks suppress both reminders.
+
+**Private by design.** Your records stay on your Mac, and the installed app works entirely offline. There are no accounts, analytics, or synchronization services. To detect inactivity, timi reads how long your Mac has been idle; it never reads what you type or which apps you use.
+
+**Small enough to stay out of your way.** Today's working time sits in the menu bar, with no permanent Dock icon. Type a project and press Enter to start or switch. Pause for a break, Play to continue, Stop when you're done. Every launch starts untracked, so opening the app never starts the clock for you.
+
+**Room to fix a real day.** Add missing time, reassign an entry to the right project, or split it between tasks. Work and breaks stay separate in your weekly overview. Rename or archive projects without losing their history.
+
+## A closer look
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/tracking.png" alt="Tracking Development with 5 hours 40 minutes worked today, project suggestions, and Pause and Stop controls" width="100%">
+      <br><strong>Pick a project. Get back to work.</strong><br>
+      Keyboard-friendly entry, project suggestions, and your daily total in one compact window.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/idle.png" alt="An 18-minute absence awaiting a choice: record as work, record as a break, or discard" width="100%">
+      <br><strong>Back from a meeting or a coffee break?</strong><br>
+      After inactivity, screen lock, or sleep, choose work, break, or discard for the whole interval.
+    </td>
+  </tr>
+</table>
+
+### Your week, at a glance
+
+Daily totals by project, breaks shown separately, and individual records when you want the detail. Browse previous weeks and keep archived projects in your history.
+
+![Weekly overview with 31 hours 40 minutes of work across Brand design, Development, and Writing, plus separate break totals](docs/images/overview.png)
+
+<details>
+<summary><strong>Made a mistake? Edit, split, or add time.</strong></summary>
+
+Adjust start and end times, change project assignments, split a period, or delete an entry. Conflicts are explained before any records change. Finish current recording before editing that interval.
+
+![The time correction editor splitting a Brand design record into two editable intervals](docs/images/corrections.png)
+
+</details>
+
+<sub>Real app screenshots with fictional project names and sample records. The header image arranges two app captures on a presentation background.</sub>
+
+## Get started
+
+1. **[Download timi for macOS](https://github.com/Tynamix/timi/releases/latest/download/timi-mac-universal.zip)** — one universal app for Apple Silicon and Intel, macOS 13 or later.
+2. Unzip and drag **timi.app** into **Applications**.
+3. Open timi, click its menu-bar clock, type a project name, and press **Enter**.
+
+The current download is ad-hoc signed and **not notarized by Apple**. If macOS blocks the first launch, use **System Settings → Privacy & Security → Open Anyway**. Releases include `SHA256SUMS` for archive verification; see the [installation guide](docs/guide.md#install-and-run).
+
+### A few things that make the day easier
+
+| When you… | timi… |
+| :--- | :--- |
+| Forget to start | Offers a reminder after 10 minutes of active use without tracking. Nothing is backfilled. |
+| Step away | Sets aside the whole interval since your last activity after 5 minutes of inactivity by default, then asks how it should count when you return. |
+| Lock your Mac or put it to sleep | Sets time aside immediately and asks you to classify it after your Mac is awake and unlocked. |
+| Switch tasks | Starts the selected project and ends the previous interval at that instant. |
+| Need a break | Records a separate, projectless break. Play resumes your previous project. |
+| Want your own rhythm | Lets you configure idle and reminder thresholds independently. Manual breaks suppress both reminders. |
+| Prefer German | Follows the macOS per-app language setting, with English and German included. |
+| Want timi ready at login | Offers optional launch at login in the packaged app, always starting untracked. |
+
+## Your records stay yours
+
+Your data lives at:
+
+```text
+~/Library/Application Support/timi/tracking.sqlite
+```
+
+To back up, quit timi and copy the whole data directory.
+
+SQLite transactions and durable checkpoints keep changes consistent. If a write fails, timi preserves the previous state and lets you retry; a failed quit leaves the app open. After a crash, recovery stops at the latest durable checkpoint. It never invents working time while the app was closed or resumes tracking on its own.
+
+The interface runs in sandboxed Electron renderers with context isolation, validated IPC, and blocked runtime network access. The platform-neutral tracking core has no Electron imports. Only macOS is currently shipped.
+
+[Data, recovery, and migration details →](docs/guide.md#data-and-recovery)
+
+## Run from source
+
+You'll need **macOS**, **Node.js 22.14+**, and **Xcode Command Line Tools**. Dependency installation and packaging require internet access; the installed app works offline.
 
 ```sh
+git clone https://github.com/Tynamix/timi.git
+cd timi
 npm ci
 npm start
 ```
 
-Click the clock and today's total in the menu bar. Enter a project name, select an existing suggestion with the arrow keys and Enter, or click a suggestion. Names are trimmed and reused without regard to case. Escape or clicking outside closes entry; tracking continues. There is no permanent Dock icon.
-
-Pause records a projectless break. Play resumes the paused project at that instant. Starting any project ends a break. Stop ends recording and clears Play. The menu-bar context menu also provides Stop, weekly overview, settings, and Quit.
-
-After five minutes without native keyboard, mouse, or trackpad activity, the complete interval since the last activity is excluded from work. Returning opens one question: record as work on the previous project, record as a projectless break, or discard. The interval continues until the choice is made, then the previous project resumes. Locking or sleeping creates the same question immediately; it appears only after both waking and unlocking. Other applications remain usable while the question is open. Stop or Quit fixes the pending endpoint and prevents resumption.
-
-After ten minutes of active use without tracking, an entry reminder offers a project, Later, or Start break. Nothing is backfilled. Manual breaks suppress both kinds of reminder. Both thresholds can be configured independently in Settings using positive whole minutes.
-
-## Reports and corrections
-
-Open **Weekly overview** from entry or the menu-bar context menu. Browse this week and prior weeks. Only projects with working time in the selected week appear as rows, including archived projects with time in that week. Work is grouped by project and Monday–Sunday; breaks have separate totals. The indicator and reports share the same accounting functions. Records are split at current local calendar boundaries, including DST, using actual elapsed milliseconds. Displayed H:MM totals truncate only after summing milliseconds; there is no commercial rounding.
-
-The overview includes record inspection and an editor for missing work/breaks, boundaries, project assignment, splits, and deletion. A replacement or split commits atomically. Conflicts with saved records, current work/breaks, or unanswered periods are rejected and explained without altering other records. Finish current recording before editing that interval. Project management supports names, rename, archive, and restore. Archived projects retain their identity and history and disappear from normal project suggestions.
-
-English and German follow the macOS per-app preferred language, with English fallback. Set this in macOS System Settings, not inside timi. Optional launch at login is available in the packaged app and reflects the actual macOS registration. Every launch begins untracked, including login launches.
-
-## Build and verify
-
-```sh
-npm run typecheck
-npm test
-npm run test:native
-npm run package
-open release/timi-darwin-arm64/timi.app
-```
-
-`npm run package` builds for the host Mac architecture. The Intel output directory is `release/timi-darwin-x64`. `npm run package:universal` builds a single application for Apple Silicon and Intel (and downloads both Electron runtimes), at `release/timi-darwin-universal/timi.app` with `release/timi-mac-universal.zip`. Packaging verifies the ad-hoc signature and creates a ZIP beside the app. Drag `timi.app` into Applications to install. Distributing it to other Macs requires your own Apple Developer signing and notarization. macOS may require **Open Anyway** for an externally downloaded local build.
-
-To run native smoke tests against a packaged app:
-
-```sh
-TIMI_TEST_EXECUTABLE="$PWD/release/timi-darwin-arm64/timi.app/Contents/MacOS/timi" npm run test:native
-```
-
-The core tests use controlled clocks, real isolated SQLite files, failures and retries, recovery, migration, midnight/week changes, and DST in Europe/Berlin and America/New_York. Native smoke tests run actual Electron windows with isolated data directories; lock/sleep signals and time advancement are injected. Screenshots and the recorded native-check limits are described in [verification](docs/verification.md).
-
-## Pull requests and releases
-
-Every pull request targeting `main` runs type checking, unit tests and the build on Linux and macOS. AI reviews use the native Codex GitHub integration, enabled in Codex repository settings. Review guidance lives in [AGENTS.md](AGENTS.md); no AI credentials are needed in GitHub Actions. See [automation setup](docs/automation.md) for review configuration and repository settings.
-
-Use Conventional Commit PR titles and squash-merge with that title: `fix: …` creates a patch release, `feat: …` a minor release, and `feat!: …` or a `BREAKING CHANGE:` footer a major release. Documentation, CI and other maintenance-only changes do not create a release. After merges to `main`, successful Linux and macOS checks allow semantic-release to publish a version tag, release notes, a universal macOS ZIP and its checksum. Version metadata is set before packaging; versions are not committed back to `main`. See [automation setup](docs/automation.md) for the recommended branch rules and first-release behavior.
-
-## Data and recovery
-
-Records are stored at `~/Library/Application Support/timi/tracking.sqlite`. To use an isolated development or testing directory:
+For a separate development database:
 
 ```sh
 npm start -- --data-directory=/tmp/timi-sandbox
 ```
 
-The app uses SQLite transactions, WAL, full synchronous writes, and macOS full-fsync. Transitions, classifications, corrections, and checkpoints persist through one application interface. Failed writes retain the prior state and can be retried. A failed quit leaves the app open. The menu-bar exclamation mark and localized errors make failures visible.
+Built with **Electron · TypeScript · plain HTML/CSS · SQLite**.
 
-An intentional quit saves through the quit instant, ends tracking, and records a clean exit. A crash is durably distinguishable from a clean exit. On restart, certain saved work is retained; recoverable uncertainty is bounded by the latest durable checkpoint, never the restart time. One question allows work, break, or discard; only crash recovery allows a different project. Existing unanswered idle questions retain their original project and fixed endpoint. Nothing resumes automatically. Time after the last durable checkpoint cannot be inferred and can be added explicitly through corrections.
+```sh
+npm run check              # Type checking, core tests, and build
+npm run test:native        # Real Electron integration checks on a Mac desktop
+npm run package:universal  # Package for Apple Silicon and Intel
+```
 
-The earlier unversioned timi schema (`projects`, `periods`, `breaks`, `idle_periods`, `settings`) is migrated in one transaction. A consistent `tracking.sqlite.pre-v1-….sqlite` backup is created first and the original tables are retained. Stable project identities, existing endpoints, settings, and unanswered questions survive. Unknown schemas, invalid rows, and unreadable databases are refused; the app never resets them. Quit the older timi version before opening this version and do not run both against one database. To back up manually, quit timi and copy the whole data directory.
+See the [build guide](docs/guide.md#build-and-verify) for host-architecture builds and packaged-app checks, and [verification notes](docs/verification.md) for test coverage and native testing limits.
 
-## Architecture and privacy
+## Contribute
 
-`src/core/application.ts` is the platform-neutral application interface. `store.ts` owns SQLite and migrations; `accounting.ts` owns local-calendar totals. `src/main.ts` adapts macOS inactivity, sleep/lock, menu bar, login registration, and window lifetime. `src/preload.ts` exposes a narrow, validated IPC interface to the plain renderer. The core has no Electron imports and can be reused by a future Windows adapter; only macOS is delivered here.
+Bug reports, thoughtful feature ideas, and pull requests are welcome. For a bug, include your macOS and timi versions, steps to reproduce, and what you expected to happen. Please keep personal time records out of public reports.
 
-Renderers are sandboxed with context isolation and no Node integration. Navigation, new windows, permissions, downloads, and network requests are blocked; a restrictive content security policy permits local assets only. The app reads the operating system's elapsed inactivity counter and power/lock events, never input contents or application usage. No global shortcuts, CSV exports, invoices, integrations, or project hierarchies are included.
+timi's focus is simple, private project time tracking. It currently has no invoices, integrations, project hierarchies, or CSV export. Changes should preserve its offline behavior, accurate accounting, and safe storage.
 
-Native integration uses the documented [Electron power monitor](https://www.electronjs.org/docs/latest/api/power-monitor), [application lifecycle and login registration APIs](https://www.electronjs.org/docs/latest/api/app), and [security recommendations](https://www.electronjs.org/docs/latest/tutorial/security).
+Run `npm run check` before opening a pull request. Use a Conventional Commit PR title such as `fix: …`, `feat: …`, or `docs: …`; releases are automated after checks pass on `main`.
+
+- [User and developer guide](docs/guide.md)
+- [Verification and known testing limits](docs/verification.md)
+- [CI, reviews, and releases](docs/automation.md)
+- [Code review rules](AGENTS.md)
+- [Refresh the README screenshots](docs/screenshots.md)
+
+## License
+
+[MIT](LICENSE). Free to use, inspect, change, and share.
