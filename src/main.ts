@@ -152,7 +152,7 @@ function refresh(): void {
   if (!tracking || quitting) return;
   const state = tracking.getSnapshot();
   const status = state.pending ? msg().pending : state.mode === 'break' ? msg().break : state.mode === 'work' ? msg().work : msg().stopped;
-  tray?.setTitle(`${stickyError || state.pending ? '! ' : state.mode === 'break' ? 'Ⅱ ' : ''}${time(state.todayMs)}`, { fontType: 'monospacedDigit' });
+  tray?.setTitle(`${stickyError || state.pending ? '! ' : state.mode === 'break' ? 'Ⅱ ' : state.mode === 'untracked' ? '■ ' : ''}${time(state.todayMs)}`, { fontType: 'monospacedDigit' });
   tray?.setToolTip(`timi · ${msg().today}: ${time(state.todayMs)}\n${stickyError ? nativeErrorText(stickyError) : status}`);
   for (const win of windows.values()) if (!win.isDestroyed()) win.webContents.send('timi:changed');
   syncWindows(state);
