@@ -1,0 +1,50 @@
+/** Platform-neutral application contract. All timestamps/durations are epoch/elapsed milliseconds. */
+export type Locale = 'en' | 'de';
+export type RecordKind = 'work' | 'break';
+export interface Project { id: string; name: string; archived: boolean }
+export interface TimeRecord { id: string; start: number; end: number; kind: RecordKind; projectId: string | null; source: 'manual' | 'tracked' | 'idle' | 'recovery' }
+export interface RecordInput { start: number; end: number; kind: RecordKind; projectId: string | null }
+export interface Settings { idleMinutes: number; reminderMinutes: number }
+export interface ActivePeriod { kind: RecordKind; start: number; projectId: string | null }
+export interface PendingPeriod { id: string; start: number; end: number | null; projectId: string | null; reason: 'idle' | 'recovery'; resume: boolean }
+export interface WeekReport {
+  start: number; end: number; days: number[];
+  rows: { projectId: string; name: string; archived: boolean; days: number[]; total: number }[];
+  workDays: number[]; breakDays: number[]; workTotal: number; breakTotal: number;
+}
+export interface Snapshot {
+  now: number; mode: 'work' | 'break' | 'untracked' | 'pending';
+  active: ActivePeriod | null; pending: PendingPeriod | null; resumeProjectId: string | null;
+  projects: Project[]; settings: Settings; records: TimeRecord[];
+  todayMs: number; week: WeekReport; reminderDue: boolean; canPresent: boolean;
+}
+export type Command =
+  | { type: 'start'; name: string }
+  | { type: 'createProject'; name: string }
+  | { type: 'pause' }
+  | { type: 'resume' }
+  | { type: 'stop' }
+  | { type: 'later' }
+  | { type: 'resolve'; choice: 'work' | 'break' | 'discard'; pendingId?: string; projectId?: string; projectName?: string }
+  | { type: 'settings'; idleMinutes: number; reminderMinutes: number }
+  | { type: 'renameProject'; id: string; name: string }
+  | { type: 'archiveProject'; id: string; archived: boolean }
+  | { type: 'correct'; removeIds: string[]; records: RecordInput[] };
+export interface NativeSample { idleMs: number; locked: boolean; sleeping: boolean }
+export interface AppError { code: string; details?: Record<string, string | number> }
+export type Result<T> = { ok: true; value: T } | { ok: false; error: AppError };
+export type WindowKind = 'entry' | 'overview' | 'settings' | 'clarification';
+export interface Environment { locale: Locale; version: string; loginAvailable: boolean; launchAtLogin: boolean; launchAtLoginStatus: 'not-registered' | 'enabled' | 'requires-approval' | 'not-found'; packaged: boolean }
+export interface DesktopAPI {
+  snapshot(weekOffset?: number): Promise<Result<Snapshot>>;
+  command(command: Command): Promise<Result<Snapshot>>;
+  environment(): Promise<Result<Environment>>;
+  setLaunchAtLogin(enabled: boolean): Promise<Result<boolean>>;
+  openWindow(kind: 'overview' | 'settings'): Promise<Result<void>>;
+  closeWindow(): Promise<Result<void>>;
+  quit(): Promise<Result<void>>;
+  onChanged(callback: () => void): () => void;
+  onError(callback: (error: AppError) => void): () => void;
+  onFocus(callback: () => void): () => void;
+}
+declare global { interface Window { timi: DesktopAPI } }
