@@ -17,16 +17,19 @@ const at = (day, hour, minute = 0) => Date.parse(`2026-10-${day}T${String(hour).
 try {
   await mkdir(output, { recursive: true });
   const bootstrap = join(temporary, 'main.cjs');
+  const { version } = JSON.parse(await readFile(resolve('package.json'), 'utf8'));
   await writeFile(bootstrap, `
     globalThis.__screenshotTime = ${at(16, 13)};
     Date.now = () => globalThis.__screenshotTime;
     require('electron').powerMonitor.getSystemIdleTime = () => globalThis.__screenshotIdle || 0;
+    require('electron').app.getVersion = () => ${JSON.stringify(version)};
     require(${JSON.stringify(resolve('dist/main.cjs'))});
   `);
   application = await _electron.launch({
     executablePath: electronPath, args: [bootstrap, `--data-directory=${join(temporary, 'data')}`, '-AppleLanguages', '(en)'],
     cwd: process.cwd(), env: environment,
   });
+  application.context().setDefaultTimeout(15_000);
   const entry = await application.firstWindow();
   const errors = [];
   application.on('window', page => page.on('pageerror', error => errors.push(String(error))));
@@ -56,6 +59,9 @@ try {
   add(16, [12, 0], [12, 30]);
   add(16, [12, 30], [13, 0], 'Writing');
   await command({ type: 'correct', removeIds: [], records });
+  await command({ type: 'settings', idleMinutes: 5, reminderMinutes: 10, workGoals: {
+    dailyHours: [8, 8, 8, 8, 6, 0, 0], notifyDaily: true, notifyWeekly: true, showRemaining: true,
+  } });
   await command({ type: 'start', name: 'Development' });
   // Frequent samples establish active use; one large clock jump correctly becomes idle.
   for (let minutes = 0; minutes < 130; minutes += 2) {
@@ -69,7 +75,7 @@ try {
   })));
   await entry.locator('.status-title').filter({ hasText: 'Development' }).waitFor();
   await entry.locator('#project-entry').fill('');
-  await entry.locator('.today-value').filter({ hasText: '5:40' }).waitFor();
+  await entry.locator('.today-value').filter({ hasText: '5:40 / 6:00' }).waitFor();
   await entry.locator('#project-entry').blur();
   await entry.screenshot({ path: join(output, 'tracking.png') });
   console.log('Captured tracking');
@@ -79,9 +85,31 @@ try {
   const overview = await overviewOpened;
   await overview.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
   await overview.waitForSelector('#app[aria-busy="false"]');
-  await overview.locator('.summary-number').filter({ hasText: '31:40' }).waitFor();
+  await overview.locator('.summary-number').filter({ hasText: '31:40 / 38:00' }).waitFor();
   await overview.screenshot({ path: join(output, 'overview.png') });
   console.log('Captured overview');
+
+  // Settings now shares the overview window; capture the real navigation and saved goals.
+  await overview.getByRole('button', { name: 'Settings', exact: true }).click();
+  await overview.locator('.settings-page').waitFor({ state: 'visible' });
+  assert.equal(await overview.locator('.goal-week-value').textContent(), '38:00 h');
+  assert.equal(await overview.locator('#show-remaining').isChecked(), true);
+  // Use a taller real window so the sticky Save footer doesn't cover the menu-bar options.
+  const overviewSize = await application.evaluate(({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows().find(window => window.webContents.getURL().endsWith('window=overview'));
+    const size = window.getContentSize();
+    window.setContentSize(1120, 960);
+    return size;
+  });
+  await overview.locator('h1').filter({ hasText: 'Settings' }).blur();
+  await overview.screenshot({ path: join(output, 'settings.png'), fullPage: true });
+  await application.evaluate(({ BrowserWindow }, size) => {
+    BrowserWindow.getAllWindows().find(window => window.webContents.getURL().endsWith('window=overview')).setContentSize(...size);
+  }, overviewSize);
+  await overview.getByRole('button', { name: '‹ Week overview', exact: true }).click();
+  await overview.locator('.overview-page').waitFor({ state: 'visible' });
+  console.log('Captured work target settings');
+
   const row = overview.locator('.records-table tbody tr').filter({ hasText: 'Brand design' }).first();
   await row.getByRole('button', { name: 'Edit', exact: true }).click();
   await overview.getByRole('button', { name: 'Split', exact: true }).click();
@@ -126,7 +154,7 @@ try {
   await canvas.evaluate(() => Promise.all([...document.images].map(img => img.decode())));
   await canvas.screenshot({ path: join(output, 'hero.png'), fullPage: true });
   assert.deepEqual(errors, []);
-  console.log(`Saved five README images to ${output}`);
+  console.log(`Saved six README images to ${output}`);
 } finally {
   if (application) {
     try { await application.evaluate(({ app }) => { app.exit(0); }); } catch {}

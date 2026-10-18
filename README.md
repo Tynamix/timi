@@ -6,7 +6,7 @@
 
 ### Your time. Your Mac. Your business.
 
-A private menu-bar time tracker for macOS that reminds you to start and asks how time away should count.
+A private menu-bar time tracker for macOS. Set your working hours, see what's left today, and decide how time away should count.
 
 **No account. No subscription. No cloud. Just your time.**
 
@@ -14,7 +14,7 @@ A private menu-bar time tracker for macOS that reminds you to start and asks how
 [![Apple Silicon & Intel](https://img.shields.io/badge/Apple_Silicon_%26_Intel-universal-214f45?style=flat-square)](https://github.com/Tynamix/timi/releases/latest)
 [![MIT license](https://img.shields.io/badge/license-MIT-214f45?style=flat-square)](LICENSE)
 
-**[Download for macOS](https://github.com/Tynamix/timi/releases/latest/download/timi-mac-universal.zip)** · [What makes timi different](#why-timi) · [Get started](#get-started) · [Contribute](#contribute)
+**[Download for macOS](https://github.com/Tynamix/timi/releases/latest/download/timi-mac-universal.zip)** · [Why timi?](#why-timi) · [Working time targets](#a-working-week-that-fits-you) · [Get started](#get-started) · [Contribute](#contribute)
 
 </div>
 
@@ -32,7 +32,9 @@ timi helps you keep track through the interruptions of a real working day. When 
 
 **Private by design.** Your records stay on your Mac, and the installed app works entirely offline. There are no accounts, analytics, or synchronization services. To detect inactivity, timi reads how long your Mac has been idle; it never reads what you type or which apps you use.
 
-**Small enough to stay out of your way.** Today's working time sits in the menu bar, with no permanent Dock icon. Type a project and press Enter to start or switch. Pause for a break, Play to continue, Stop when you're done. Every launch starts untracked, so opening the app never starts the clock for you.
+**Your working week, on your terms.** Set a different target for each weekday, including shorter days and days off. See time worked or time remaining in the menu bar, and optionally get a macOS notification when your daily or weekly target is reached. Reaching a target keeps the timer running; you choose when to stop.
+
+**Small enough to stay out of your way.** Your daily timer sits in the menu bar, with no permanent Dock icon. Type a project and press Enter to start or switch. Pause for a break, Play to continue, Stop when you're done. Every launch starts untracked, so opening the app never starts the clock for you.
 
 **Room to fix a real day.** Add missing time, reassign an entry to the right project, or split it between tasks. Work and breaks stay separate in your weekly overview. Rename or archive projects without losing their history.
 
@@ -41,9 +43,9 @@ timi helps you keep track through the interruptions of a real working day. When 
 <table>
   <tr>
     <td width="50%" valign="top">
-      <img src="docs/images/tracking.png" alt="Tracking Development with 5 hours 40 minutes worked today, project suggestions, and Pause and Stop controls" width="100%">
+      <img src="docs/images/tracking.png" alt="Tracking Development with 5 hours 40 minutes worked toward a 6-hour daily target, project suggestions, and Pause and Stop controls" width="100%">
       <br><strong>Pick a project. Get back to work.</strong><br>
-      Keyboard-friendly entry, project suggestions, and your daily total in one compact window.
+      Keyboard-friendly entry, project suggestions, and today's progress toward your target in one compact window.
     </td>
     <td width="50%" valign="top">
       <img src="docs/images/idle.png" alt="An 18-minute absence awaiting a choice: record as work, record as a break, or discard" width="100%">
@@ -55,9 +57,29 @@ timi helps you keep track through the interruptions of a real working day. When 
 
 ### Your week, at a glance
 
-Daily totals by project, breaks shown separately, and individual records when you want the detail. Browse previous weeks and keep archived projects in your history.
+Daily totals by project, breaks shown separately, and individual records when you want the detail. The current week shows your working time alongside your weekly target. Browse previous weeks and keep archived projects in your history.
 
-![Weekly overview with 31 hours 40 minutes of work across Brand design, Development, and Writing, plus separate break totals](docs/images/overview.png)
+![Weekly overview with 31 hours 40 minutes worked toward a 38-hour target across Brand design, Development, and Writing, plus separate break totals](docs/images/overview.png)
+
+### A working week that fits you
+
+Eight-hour weekdays, a shorter Friday, or weekend work: enter your own hours for Monday through Sunday in **Settings → Working time targets**. Use `0` for a day off. Decimal points and commas both work: `7.6` or `7,6` means **7 hours 36 minutes**. The weekly target is calculated from all seven days; targets are optional and start at zero.
+
+![Settings with a 38-hour weekly target, an 8-hour Monday through Thursday, a 6-hour Friday, weekends off, and switches for remaining time and target notifications](docs/images/settings.png)
+
+Enable **Show remaining working time** to count down to today's target in the menu bar. For a six-hour day:
+
+| Time worked | Menu-bar timer | Meaning |
+| :--- | :--- | :--- |
+| 5:40 | `0:20` | Twenty minutes left |
+| 6:00 | `0:00` | Daily target reached |
+| 6:15 | `−0:15` | Fifteen minutes overtime |
+
+Leave the switch off to show time worked. On days without a target, timi also shows worked time. The preference survives restarts, and hovering over the timer always shows today's worked total. A remaining partial minute rounds up so the countdown doesn't reach zero early.
+
+**A nudge when you've done your hours.** Enable daily and weekly target notifications separately. Only confirmed work counts; breaks and unresolved time away are excluded. Notifications are recorded so they don't repeat in the same local day or week after restarting, changing a target, or correcting an entry. Clicking one opens the weekly overview. Allow timi in **System Settings → Notifications**; macOS notification settings and Focus control how it appears.
+
+**One window for your week and preferences.** Open **Settings** from the overview, then use **Week overview** to go back. Both views share a resizable window and preserve your selected week and unsaved preferences while you switch. Settings from the tracker or menu bar opens the same window directly.
 
 <details>
 <summary><strong>Made a mistake? Edit, split, or add time.</strong></summary>
@@ -87,9 +109,14 @@ The current download is ad-hoc signed and **not notarized by Apple**. If macOS b
 | Lock your Mac or put it to sleep | Sets time aside immediately and asks you to classify it after your Mac is awake and unlocked. |
 | Switch tasks | Starts the selected project and ends the previous interval at that instant. |
 | Need a break | Records a separate, projectless break. Play resumes your previous project. |
+| Have different hours on different days | Saves a target for each weekday and calculates your weekly target. Use zero for days off. |
+| Want to know what's left today | Counts down to your daily target in the menu bar and shows overtime with a minus sign. |
+| Reach your daily or weekly target | Can send one macOS notification per day or week; tracking continues until you stop. |
 | Want your own rhythm | Lets you configure idle and reminder thresholds independently. Manual breaks suppress both reminders. |
 | Prefer German | Follows the macOS per-app language setting, with English and German included. |
 | Want timi ready at login | Offers optional launch at login in the packaged app, always starting untracked. |
+
+The menu bar also makes the tracking state visible: `■` means untracked, `Ⅱ` means a break, and `!` means time needs clarification or an error needs attention. During work, it shows the timer without a status prefix.
 
 ## Your records stay yours
 
