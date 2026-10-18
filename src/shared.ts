@@ -5,7 +5,11 @@ export interface Project { id: string; name: string; archived: boolean }
 export interface TimeRecord { id: string; start: number; end: number; kind: RecordKind; projectId: string | null; source: 'manual' | 'tracked' | 'idle' | 'recovery' }
 export interface RecordInput { start: number; end: number; kind: RecordKind; projectId: string | null }
 /** Monday through Sunday; zero hours means a day off. */
-export interface WorkGoals { dailyHours: number[]; notifyDaily: boolean; notifyWeekly: boolean }
+export interface WorkGoals {
+  dailyHours: number[]; notifyDaily: boolean; notifyWeekly: boolean;
+  /** Absent in older preferences; defaults to displaying worked time. */
+  showRemaining?: boolean;
+}
 export interface WorkGoalNotice { kind: 'day' | 'week'; period: string; targetMs: number; workedMs: number }
 export interface Settings { idleMinutes: number; reminderMinutes: number; workGoals: WorkGoals }
 export interface ActivePeriod { kind: RecordKind; start: number; projectId: string | null }

@@ -45,7 +45,7 @@ test('decimal hours accept comma and dot, zero days off, and exact 7.6-hour targ
 test('IPC and application reject malformed goals without changing saved settings', t => {
   const f = fixture(t); f.configure();
   const before = f.app.getSnapshot();
-  const malformed: unknown[] = [null, {}, { ...goals(), extra: true }, { ...goals(), notifyDaily: 'yes' },
+  const malformed: unknown[] = [null, {}, { ...goals(), extra: true }, { ...goals(), notifyDaily: 'yes' }, { ...goals(), showRemaining: 'yes' }, { ...goals(), showRemaining: null },
     ...[[], [8], Array(8).fill(8), [NaN, 0, 0, 0, 0, 0, 0], [Infinity, 0, 0, 0, 0, 0, 0], [-1, 0, 0, 0, 0, 0, 0], [25, 0, 0, 0, 0, 0, 0], ['8', 0, 0, 0, 0, 0, 0], Array(7)].map(dailyHours => ({ ...goals(), dailyHours }))];
   for (const workGoals of malformed) {
     const command = { type: 'settings' as const, idleMinutes: 5, reminderMinutes: 10, workGoals: workGoals as WorkGoals };
@@ -58,14 +58,15 @@ test('IPC and application reject malformed goals without changing saved settings
 test('goals persist atomically; failed settings save can be retried and old commands preserve the schedule', t => {
   const f = fixture(t); const before = f.app.getSnapshot(); const durable = f.store.load();
   f.store.db.exec("CREATE TRIGGER fail_settings BEFORE UPDATE ON timi_runtime BEGIN SELECT RAISE(ABORT, 'failure'); END");
-  assert.throws(() => f.configure(goals([7.6, 8, 0, 0, 0, 4, 0])));
+  assert.throws(() => f.configure({ ...goals([7.6, 8, 0, 0, 0, 4, 0]), showRemaining: true }));
   assert.deepEqual(f.app.getSnapshot(), before); assert.deepEqual(f.store.load(), durable);
   f.store.db.exec('DROP TRIGGER fail_settings');
-  f.configure(goals([7.6, 8, 0, 0, 0, 4, 0]));
+  f.configure({ ...goals([7.6, 8, 0, 0, 0, 4, 0]), showRemaining: true });
   const settings = f.app.getSnapshot().settings;
   f.app.execute({ type: 'settings', idleMinutes: 5, reminderMinutes: 10 });
   f.app.quit(); f.store.close();
   const reopened = f.open(); assert.deepEqual(reopened.app.getSnapshot().settings, settings);
+  assert.equal(reopened.app.getSnapshot().settings.workGoals.showRemaining, true);
   assert.equal(reopened.app.getSnapshot().mode, 'untracked');
 });
 

@@ -44,7 +44,12 @@ async function launch(language) {
   await entry.waitForSelector('#app[aria-busy="false"]');
   const nativeIdleSeconds = await application.evaluate(({ powerMonitor }) => powerMonitor.getSystemIdleTime());
   assert.equal(Number.isSafeInteger(nativeIdleSeconds) && nativeIdleSeconds >= 0, true);
-  await application.evaluate(({ powerMonitor, app, BrowserWindow }) => {
+  await application.evaluate(({ powerMonitor, app, BrowserWindow, Tray }) => {
+    const setTitle = Tray.prototype.setTitle;
+    Tray.prototype.setTitle = function (title, options) {
+      globalThis.__timiSmokeTrayTitle = title;
+      return setTitle.call(this, title, options);
+    };
     globalThis.__timiSmokeWindowEvents = [];
     const watch = window => {
       for (const event of ['show', 'hide', 'focus', 'blur']) window.on(event, () => {
@@ -54,7 +59,11 @@ async function launch(language) {
     BrowserWindow.getAllWindows().forEach(watch);
     app.on('browser-window-created', (_event, window) => watch(window));
     app.on('activate', () => globalThis.__timiSmokeWindowEvents.push({ event: 'app-activate' }));
-    globalThis.__timiSmokeTime = Date.now();
+    // Start at the next local noon so correction examples a few hours earlier stay
+    // in the displayed day/week, including real runs just after Monday midnight.
+    const noon = new Date(); noon.setHours(12, 0, 0, 123);
+    if (noon.getTime() < Date.now()) noon.setDate(noon.getDate() + 1);
+    globalThis.__timiSmokeTime = noon.getTime();
     globalThis.__timiSmokeIdleSeconds = 0;
     Date.now = () => globalThis.__timiSmokeTime;
     powerMonitor.getSystemIdleTime = () => globalThis.__timiSmokeIdleSeconds;
@@ -238,9 +247,17 @@ try {
   await settings.locator('#idle-minutes').fill('2');
   await settings.locator('#reminder-minutes').fill('3');
   for (const [index, hours] of ['7,6', '8', '8', '8', '8', '4', '0'].entries()) await settings.locator(`#work-hours-${index}`).fill(hours);
+  await settings.getByRole('switch', { name: 'Show remaining working time', exact: true }).check();
   await settings.getByRole('button', { name: 'Save preferences', exact: true }).click();
   await eventually(async () => (await state(settings)).settings.idleMinutes === 2, 'preferences save');
   assert.deepEqual((await state(settings)).settings.workGoals.dailyHours, [7.6, 8, 8, 8, 8, 4, 0]);
+  assert.equal((await state(settings)).settings.workGoals.showRemaining, true);
+  const displayState = await state(settings);
+  const targetHours = displayState.settings.workGoals.dailyHours[(new Date(displayState.now).getDay() + 6) % 7];
+  const remainingMs = Math.round(targetHours * 3_600_000) - displayState.todayMs;
+  const displayMinutes = targetHours > 0 ? Math.abs(Math.ceil(remainingMs / 60_000)) : Math.floor(displayState.todayMs / 60_000);
+  const expectedDisplay = `${targetHours > 0 && remainingMs < 0 ? '−' : ''}${Math.floor(displayMinutes / 60)}:${String(displayMinutes % 60).padStart(2, '0')}`;
+  assert.equal((await f.application.evaluate(() => globalThis.__timiSmokeTrayTitle)).replace(/^[!Ⅱ■] /, ''), expectedDisplay);
   await saveScreenshot(settings, 'settings-work-goals-en');
   await settings.locator('.work-goals-section').screenshot({ path: join(artifacts, 'work-goals-en.png') });
   const savedSettings = (await state(settings)).settings;
@@ -252,6 +269,12 @@ try {
   await settings.getByRole('button', { name: 'Save preferences', exact: true }).click();
   assert.deepEqual((await state(settings)).settings, savedSettings);
   await settings.locator('#work-hours-0').fill('7,6');
+  await settings.getByRole('switch', { name: 'Show remaining working time', exact: true }).uncheck();
+  await settings.getByRole('button', { name: 'Save preferences', exact: true }).click();
+  assert.equal((await state(settings)).settings.workGoals.showRemaining, false);
+  const workedMinutes = Math.floor((await state(settings)).todayMs / 60_000);
+  assert.equal((await f.application.evaluate(() => globalThis.__timiSmokeTrayTitle)).replace(/^[!Ⅱ■] /, ''), `${Math.floor(workedMinutes / 60)}:${String(workedMinutes % 60).padStart(2, '0')}`);
+  record('Menu-bar switch saves remaining/worked mode and updates the native status-item title');
   record('Settings persist weekday targets with decimal commas and reject invalid hours atomically; navigation closes entry');
 
   await entry.evaluate(() => window.timi.openWindow('overview'));

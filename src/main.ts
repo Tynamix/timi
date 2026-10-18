@@ -6,6 +6,7 @@ import { SqliteStore } from './core/store';
 import { TrackingApplication } from './core/application';
 import { isCommand } from './validation';
 import { detectLocale, nativeMessages } from './native-messages';
+import { statusTime } from './status-time';
 import type { AppError, Environment, Locale, Result, Snapshot, WindowKind, WorkGoalNotice } from './shared';
 
 app.setName('timi');
@@ -155,8 +156,9 @@ function refresh(): void {
   if (!tracking || quitting) return;
   const state = tracking.getSnapshot();
   const status = state.pending ? msg().pending : state.mode === 'break' ? msg().break : state.mode === 'work' ? msg().work : msg().stopped;
-  tray?.setTitle(`${stickyError || state.pending ? '! ' : state.mode === 'break' ? 'Ⅱ ' : state.mode === 'untracked' ? '■ ' : ''}${time(state.todayMs)}`, { fontType: 'monospacedDigit' });
-  tray?.setToolTip(`timi · ${msg().today}: ${time(state.todayMs)}\n${stickyError ? nativeErrorText(stickyError) : status}`);
+  const display = statusTime(state);
+  tray?.setTitle(`${stickyError || state.pending ? '! ' : state.mode === 'break' ? 'Ⅱ ' : state.mode === 'untracked' ? '■ ' : ''}${display.text}`, { fontType: 'monospacedDigit' });
+  tray?.setToolTip(`timi · ${display.remaining ? `${msg().remainingToday}: ${display.text}\n` : ''}${msg().today}: ${time(state.todayMs)}\n${stickyError ? nativeErrorText(stickyError) : status}`);
   for (const win of windows.values()) if (!win.isDestroyed()) win.webContents.send('timi:changed');
   syncWindows(state);
   syncGoalNotifications(state);

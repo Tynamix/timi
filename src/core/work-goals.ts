@@ -5,10 +5,11 @@ import type { PersistedState, RuntimeState } from './model.js';
 export function validWorkGoals(value: unknown): value is WorkGoals {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const goal = value as Record<string, unknown>;
-  return Object.keys(goal).every(key => ['dailyHours', 'notifyDaily', 'notifyWeekly'].includes(key))
+  return Object.keys(goal).every(key => ['dailyHours', 'notifyDaily', 'notifyWeekly', 'showRemaining'].includes(key))
     && Array.isArray(goal.dailyHours) && goal.dailyHours.length === 7
     && Array.from(goal.dailyHours).every(hours => typeof hours === 'number' && Number.isFinite(hours) && hours >= 0 && hours <= 24)
-    && typeof goal.notifyDaily === 'boolean' && typeof goal.notifyWeekly === 'boolean';
+    && typeof goal.notifyDaily === 'boolean' && typeof goal.notifyWeekly === 'boolean'
+    && (goal.showRemaining === undefined || typeof goal.showRemaining === 'boolean');
 }
 
 export const hoursMs = (hours: number): number => Math.round(hours * 3_600_000);

@@ -1,6 +1,7 @@
 import type { Locale } from './shared';
 export const nativeMessages = {
   en: {
+    remainingToday: 'Remaining today',
     dailyGoalTitle: 'Daily working time reached', dailyGoalBody: 'You have reached your daily target of {time} hours.',
     weeklyGoalTitle: 'Weekly working time reached', weeklyGoalBody: 'You have reached your weekly target of {time} hours.',
     today: 'Today', work: 'Working', break: 'On break', pending: 'Time needs clarification', stopped: 'Not tracking',
@@ -12,6 +13,7 @@ export const nativeMessages = {
     retry: 'Retry', stayOpen: 'Keep timi open', exit: 'Close', edit: 'Edit', undo: 'Undo', redo: 'Redo', cut: 'Cut', copy: 'Copy', paste: 'Paste', selectAll: 'Select All',
   },
   de: {
+    remainingToday: 'Heute verbleibend',
     dailyGoalTitle: 'Tagesarbeitszeit erreicht', dailyGoalBody: 'Du hast dein Tagesziel von {time} Stunden erreicht.',
     weeklyGoalTitle: 'Wochenarbeitszeit erreicht', weeklyGoalBody: 'Du hast dein Wochenziel von {time} Stunden erreicht.',
     today: 'Heute', work: 'Arbeit läuft', break: 'Pause läuft', pending: 'Zeit muss zugeordnet werden', stopped: 'Keine Zeiterfassung',
