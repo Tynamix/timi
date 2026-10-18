@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import test, { type TestContext } from 'node:test';
 import { SqliteStore } from '../src/core/store.js';
 import { TrackingApplication } from '../src/core/application.js';
+import { DEFAULT_SETTINGS } from '../src/core/model.js';
 import type { Command, NativeSample, Snapshot, TimeRecord } from '../src/shared.js';
 
 const MINUTE = 60_000;
@@ -75,7 +76,7 @@ test('startup is untracked, with persisted defaults and no resume shortcut', t =
   assert.equal(state.resumeProjectId, null);
   assert.equal(state.pending, null);
   assert.equal(state.todayMs, 0);
-  assert.deepEqual(state.settings, { idleMinutes: 5, reminderMinutes: 10 });
+  assert.deepEqual(state.settings, DEFAULT_SETTINGS);
 });
 
 test('trimmed case-insensitive projects preserve spelling and same-project starts are no-ops', t => {

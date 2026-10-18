@@ -1,10 +1,11 @@
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
-import type { PendingPeriod, Project, TimeRecord } from '../shared.js';
+import type { PendingPeriod, Project, TimeRecord, WorkGoalNotice } from '../shared.js';
+import { validWorkGoals } from './work-goals.js';
 import { AppFailure, storageFailure } from './errors.js';
 import { DEFAULT_SETTINGS, freshRuntime, projectKey, validMinutes, validTimestamp, type PersistedState, type RuntimeState } from './model.js';
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const SCHEMA = `
 CREATE TABLE timi_projects (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, name_key TEXT NOT NULL UNIQUE,
@@ -23,6 +24,14 @@ CREATE TABLE timi_runtime (id INTEGER PRIMARY KEY CHECK (id = 1), state_json TEX
 INSERT INTO timi_settings VALUES (1, 5, 10);
 INSERT INTO timi_runtime VALUES (1, NULL);
 PRAGMA user_version = 1;
+`;
+const UPGRADE_V2 = `
+ALTER TABLE timi_settings ADD COLUMN work_goals_json TEXT NOT NULL DEFAULT '${JSON.stringify(DEFAULT_SETTINGS.workGoals)}';
+CREATE TABLE timi_goal_notices (
+  kind TEXT NOT NULL CHECK (kind IN ('day', 'week')), period TEXT NOT NULL,
+  PRIMARY KEY (kind, period)
+);
+PRAGMA user_version = 2;
 `;
 
 function assert(condition: unknown): asserts condition { if (!condition) throw new AppFailure('STORAGE_INVALID'); }
@@ -79,7 +88,7 @@ export class SqliteStore {
       const version = this.db.prepare('PRAGMA user_version').get()!.user_version as number;
       if (version > SCHEMA_VERSION || version < 0) throw new AppFailure('STORAGE_VERSION', { version });
       const names = this.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all().map(row => row.name as string);
-      if (version === 0 && names.length === 0) this.transaction(() => this.db.exec(SCHEMA));
+      if (version === 0 && names.length === 0) this.transaction(() => this.db.exec(SCHEMA + UPGRADE_V2));
       else if (version === 0) {
         const legacy = ['projects', 'periods', 'breaks', 'idle_periods', 'settings'];
         assert(names.length === legacy.length && legacy.every(name => names.includes(name)));
@@ -92,6 +101,14 @@ export class SqliteStore {
         this.transaction(() => this.migrateLegacy());
       } else {
         assert(['timi_projects', 'timi_records', 'timi_settings', 'timi_runtime'].every(name => names.includes(name)));
+        if (version === 2) assert(names.includes('timi_goal_notices'));
+        if (version === 1) {
+          if (path !== ':memory:') {
+            backup = `${path}.pre-v2-${randomUUID()}.sqlite`;
+            this.db.prepare('VACUUM INTO ?').run(backup);
+          }
+          this.transaction(() => { this.db.exec(UPGRADE_V2); this.load(); });
+        }
       }
       this.db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA fullfsync = ON;');
       this.load(); // Refuse malformed rows instead of replacing or normalizing unreadable data.
@@ -133,9 +150,13 @@ export class SqliteStore {
         assert((record.kind === 'work' && record.projectId !== null && ids.has(record.projectId)) || (record.kind === 'break' && record.projectId === null));
         assert(['manual', 'tracked', 'idle', 'recovery'].includes(record.source));
       }
-      const configuration = this.db.prepare('SELECT idle_minutes, reminder_minutes FROM timi_settings WHERE id = 1').get();
+      const configuration = this.db.prepare('SELECT idle_minutes, reminder_minutes, work_goals_json FROM timi_settings WHERE id = 1').get();
       assert(configuration && validMinutes(configuration.idle_minutes) && validMinutes(configuration.reminder_minutes));
-      const settings = { idleMinutes: configuration.idle_minutes, reminderMinutes: configuration.reminder_minutes };
+      let workGoals: unknown;
+      try { workGoals = JSON.parse(configuration.work_goals_json as string); }
+      catch (error) { throw new AppFailure('STORAGE_INVALID', undefined, { cause: error }); }
+      assert(validWorkGoals(workGoals));
+      const settings = { idleMinutes: configuration.idle_minutes, reminderMinutes: configuration.reminder_minutes, workGoals };
       const row = this.db.prepare('SELECT state_json FROM timi_runtime WHERE id = 1').get();
       assert(row);
       let runtime: unknown;
@@ -181,13 +202,22 @@ export class SqliteStore {
     for (const record of next.records) if (JSON.stringify(oldRecords.get(record.id)) !== JSON.stringify(record)) recordStatement.run(record.id, record.start, record.end, record.kind, record.projectId, record.source);
     const deleteProject = this.db.prepare('DELETE FROM timi_projects WHERE id = ?');
     for (const project of before.projects) if (!projects.has(project.id)) deleteProject.run(project.id);
-    this.db.prepare('UPDATE timi_settings SET idle_minutes = ?, reminder_minutes = ? WHERE id = 1').run(next.settings.idleMinutes, next.settings.reminderMinutes);
+    this.db.prepare('UPDATE timi_settings SET idle_minutes = ?, reminder_minutes = ?, work_goals_json = ? WHERE id = 1').run(next.settings.idleMinutes, next.settings.reminderMinutes, JSON.stringify(next.settings.workGoals));
     this.db.prepare('UPDATE timi_runtime SET state_json = ? WHERE id = 1').run(JSON.stringify(next.runtime));
   }
 
   close(): void {
     if (this.closed) return;
     try { this.db.close(); this.closed = true; } catch (error) { throw storageFailure(error); }
+  }
+
+  hasWorkGoalNotice(notice: WorkGoalNotice): boolean {
+    try { return !!this.db.prepare('SELECT 1 FROM timi_goal_notices WHERE kind = ? AND period = ?').get(notice.kind, notice.period); }
+    catch (error) { throw storageFailure(error); }
+  }
+
+  acknowledgeWorkGoalNotice(notice: WorkGoalNotice): void {
+    this.transaction(() => this.db.prepare('INSERT OR IGNORE INTO timi_goal_notices (kind, period) VALUES (?, ?)').run(notice.kind, notice.period));
   }
 
   private validateLegacySchema(): void {
@@ -231,7 +261,7 @@ export class SqliteStore {
     runtime.pending = pending.shift() ?? null;
     runtime.pendingQueue = pending;
     runtime.cleanExit = true;
-    this.db.exec(SCHEMA);
+    this.db.exec(SCHEMA + UPGRADE_V2);
     this.writeState({ projects, records, settings: { ...DEFAULT_SETTINGS, idleMinutes: oldSettings.idle_minutes }, runtime }, { projects: [], records: [], settings: DEFAULT_SETTINGS, runtime: null });
     this.load();
   }

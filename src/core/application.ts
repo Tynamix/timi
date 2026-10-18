@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import type { ActivePeriod, Command, NativeSample, PendingPeriod, Project, RecordInput, Snapshot, TimeRecord } from '../shared.js';
+import type { ActivePeriod, Command, NativeSample, PendingPeriod, Project, RecordInput, Snapshot, TimeRecord, WorkGoalNotice } from '../shared.js';
+import { reachedWorkGoals, validWorkGoals } from './work-goals.js';
 import { accounting } from './accounting.js';
 import { AppFailure } from './errors.js';
 import { freshRuntime, projectKey, projectName, validMinutes, validTimestamp, type PersistedState, type RuntimeState } from './model.js';
@@ -106,7 +107,9 @@ export class TrackingApplication {
           return;
         case 'settings': {
           if (!validMinutes(command.idleMinutes) || !validMinutes(command.reminderMinutes)) throw new AppFailure('INVALID_SETTINGS');
-          draft.settings = { idleMinutes: command.idleMinutes, reminderMinutes: command.reminderMinutes };
+          if (command.workGoals !== undefined && !validWorkGoals(command.workGoals)) throw new AppFailure('INVALID_SETTINGS');
+          draft.settings = { idleMinutes: command.idleMinutes, reminderMinutes: command.reminderMinutes,
+            workGoals: structuredClone(command.workGoals ?? draft.settings.workGoals) };
           this.detectIdle(draft, now, false);
           this.updateReminderDue(draft);
           return;
@@ -151,6 +154,17 @@ export class TrackingApplication {
   checkpoint(): void {
     this.flushObservations();
     this.mutate(this.readClock(), () => {}, true);
+  }
+
+  getWorkGoalNotices(): WorkGoalNotice[] {
+    // Do not notify from stale state while a failed observation is waiting for retry.
+    if (this.observations.length) return [];
+    return reachedWorkGoals(this.state, this.readClock()).filter(notice => !this.store.hasWorkGoalNotice(notice));
+  }
+
+  acknowledgeWorkGoalNotice(notice: WorkGoalNotice): void {
+    // Notification receipts never persist an in-memory runtime or advance crash recovery.
+    this.store.acknowledgeWorkGoalNotice(notice);
   }
 
   quit(): void {

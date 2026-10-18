@@ -24,7 +24,7 @@ export interface PersistedState {
   settings: Settings;
   runtime: RuntimeState | null;
 }
-export const DEFAULT_SETTINGS: Settings = { idleMinutes: 5, reminderMinutes: 10 };
+export const DEFAULT_SETTINGS: Settings = { idleMinutes: 5, reminderMinutes: 10, workGoals: { dailyHours: [0, 0, 0, 0, 0, 0, 0], notifyDaily: true, notifyWeekly: true, showRemaining: false } };
 export const MAX_DATE_MS = 8_640_000_000_000_000;
 export function validTimestamp(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && Math.abs(value) <= MAX_DATE_MS;

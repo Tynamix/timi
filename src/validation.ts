@@ -1,4 +1,5 @@
 import type { Command, RecordInput } from './shared';
+import { validWorkGoals } from './core/work-goals';
 
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const text = (v: unknown): v is string => typeof v === 'string' && v.length <= 16_384;
@@ -15,7 +16,8 @@ export function isCommand(v: unknown): v is Command {
     case 'pause': case 'resume': case 'stop': case 'later': return keys(v, ['type']);
     case 'resolve': return keys(v, ['type', 'choice', 'pendingId', 'projectId', 'projectName']) && ['work', 'break', 'discard'].includes(String(v.choice)) && (v.pendingId === undefined || text(v.pendingId))
       && (v.projectId === undefined || text(v.projectId)) && (v.projectName === undefined || text(v.projectName));
-    case 'settings': return keys(v, ['type', 'idleMinutes', 'reminderMinutes']) && integer(v.idleMinutes) && integer(v.reminderMinutes);
+    case 'settings': return keys(v, ['type', 'idleMinutes', 'reminderMinutes', 'workGoals']) && integer(v.idleMinutes) && integer(v.reminderMinutes)
+      && (v.workGoals === undefined || validWorkGoals(v.workGoals));
     case 'renameProject': return keys(v, ['type', 'id', 'name']) && text(v.id) && text(v.name);
     case 'archiveProject': return keys(v, ['type', 'id', 'archived']) && text(v.id) && typeof v.archived === 'boolean';
     case 'correct': return keys(v, ['type', 'removeIds', 'records']) && Array.isArray(v.removeIds) && Array.isArray(v.records)

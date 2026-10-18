@@ -1,7 +1,11 @@
 import { localDateInput, possibleLocalTimes } from './time-input';
+import { parseWorkHours } from './work-hours';
+import { dailyTargetMs, hoursMs, weeklyTargetMs } from '../core/work-goals';
 import type { AppError, Command, Environment, Locale, Project, RecordInput, Result, Snapshot, TimeRecord, WindowKind } from '../shared';
 
 const en = {
+  menuBarDisplay: 'Menu bar', showRemaining: 'Show remaining working time', showRemainingHelp: 'Off: worked time. On: time left until your daily target.', showRemainingFallback: 'Without a daily target, worked time is shown. Overtime appears with a minus sign.',
+  workGoals: 'Working time targets', workGoalsIntro: 'Your regular hours, day by day.', workGoalsHelp: '0 = day off · Decimal hours: 7.6 h = 7 h 36 min', hours: 'hours', weeklyTarget: 'Weekly target', goalDays: '{days} working days · Mon–Sun', dayOff: 'Day off', goalReminders: 'Notifications', dailyGoalToggle: 'Daily target reached', weeklyGoalToggle: 'Weekly target reached', dailyGoalHelp: 'One notification per day', weeklyGoalHelp: 'One notification per week', goalNotificationSummary: 'About notifications', goalNotificationHelp: 'Breaks and unresolved time are excluded. Notifications do not repeat after restarting timi. Allow notifications for timi in System Settings → Notifications.', invalidWorkHours: 'Enter 0 to 24 hours for each weekday, for example 7.6 or 7,6.', target: 'Target',
   loading: 'Opening timi…', today: 'WORKED TODAY', untracked: 'Ready when you are', untrackedDetail: 'Choose a project to start working.', working: 'Working', manualBreak: 'On a break', breakDetail: 'Your break continues until you choose.', pending: 'Time needs clarification', pendingDetail: 'Resolve the open question before continuing.',
   pause: 'Pause', play: 'Play', stop: 'Stop', project: 'Project', projectPlaceholder: 'What are you working on?', entryHint: 'Enter starts a project. Esc closes this window.', entryKeys: '↑ ↓ to select · ↵ to start', current: 'Running', noProjects: 'Type a name and press Enter to create your first project.', noMatches: 'Press Enter to start this new project.', overview: 'Week overview', settings: 'Settings', quit: 'Quit timi',
   reminderTitle: 'Ready to track your time?', reminderText: 'You have been active without a project. Choose one to start now, or take a break.', later: 'Later', startBreak: 'Start break',
@@ -14,6 +18,8 @@ const en = {
   errorStorage: 'timi could not save or read its data. Your previous state has been preserved. Check free disk space and folder access, then try again.', errorStorageVersion: 'This data was created by a newer timi version. It has not been replaced.', errorStorageInvalid: 'The saved data cannot be read safely. It has not been replaced.', errorCommand: 'This action is not valid right now.', errorProjectExists: 'A project with that name already exists. Choose a different name.', errorInvalidProject: 'Enter or select a valid project.', errorProjectMissing: 'That project could not be found. Refresh and try again.', errorPending: 'Resolve the pending time question before starting work or a break.', errorOverlap: 'This period overlaps saved or ongoing work or a break. Adjust its boundaries; no records were changed.', errorRecordMissing: 'That record no longer exists. Close this editor and try again.', errorClock: 'The system clock moved backwards or is invalid. Check the date and time and try again.', errorGeneric: 'The action could not be completed. Please try again.', errorActivity: 'macOS inactivity could not be read. Please try again; timi has kept the previous state.', errorLogin: 'The macOS login setting could not be updated. Check System Settings → General → Login Items.', errorConflictTime: 'Conflicting interval: {start} – {end}.', errorDetailsProject: 'Project: {project}.', dismissError: 'Dismiss message', close: 'Close', refresh: 'Refresh', noProject: 'No project',
 } as const;
 const de: Record<keyof typeof en, string> = {
+  menuBarDisplay: 'Menüleiste', showRemaining: 'Restarbeitszeit anzeigen', showRemainingHelp: 'Aus: gearbeitete Zeit. Ein: verbleibende Zeit bis zum Tagesziel.', showRemainingFallback: 'Ohne Tagesziel wird die gearbeitete Zeit angezeigt. Überstunden erscheinen mit Minuszeichen.',
+  workGoals: 'Arbeitszeitziele', workGoalsIntro: 'Deine reguläre Arbeitszeit pro Tag.', workGoalsHelp: '0 = frei · Dezimalstunden: 7,6 h = 7 Std. 36 Min.', hours: 'Stunden', weeklyTarget: 'Wochenziel', goalDays: '{days} Arbeitstage · Mo–So', dayOff: 'Frei', goalReminders: 'Benachrichtigungen', dailyGoalToggle: 'Tagesziel erreicht', weeklyGoalToggle: 'Wochenziel erreicht', dailyGoalHelp: 'Eine Mitteilung pro Tag', weeklyGoalHelp: 'Eine Mitteilung pro Woche', goalNotificationSummary: 'Hinweise zu Mitteilungen', goalNotificationHelp: 'Pausen und ungeklärte Zeit zählen nicht mit. Mitteilungen wiederholen sich auch nach einem Neustart von timi nicht. Erlaube Mitteilungen für timi unter Systemeinstellungen → Mitteilungen.', invalidWorkHours: 'Gib für jeden Wochentag 0 bis 24 Stunden ein, zum Beispiel 7,6 oder 7.6.', target: 'Ziel',
   loading: 'timi wird geöffnet…', today: 'HEUTE GEARBEITET', untracked: 'Bereit, wenn du es bist', untrackedDetail: 'Wähle ein Projekt und starte.', working: 'Arbeit', manualBreak: 'In einer Pause', breakDetail: 'Die Pause läuft bis zu deiner Entscheidung.', pending: 'Zeit wartet auf Klärung', pendingDetail: 'Kläre zuerst die offene Zeitspanne.',
   pause: 'Pause', play: 'Weiter', stop: 'Stopp', project: 'Projekt', projectPlaceholder: 'Woran arbeitest du?', entryHint: 'Enter startet ein Projekt. Esc schließt dieses Fenster.', entryKeys: '↑ ↓ auswählen · ↵ starten', current: 'Läuft', noProjects: 'Gib einen Namen ein und drücke Enter, um dein erstes Projekt anzulegen.', noMatches: 'Drücke Enter, um dieses neue Projekt zu starten.', overview: 'Wochenübersicht', settings: 'Einstellungen', quit: 'timi beenden',
   reminderTitle: 'Möchtest du deine Zeit erfassen?', reminderText: 'Du bist ohne Projekt aktiv. Wähle ein Projekt und starte jetzt, oder beginne eine Pause.', later: 'Später', startBreak: 'Pause starten',
@@ -165,7 +171,8 @@ function renderSuggestions(recompute = true): void {
 }
 let entryControlSignature = '';
 function updateEntry(): void {
-  todayValue.textContent = fmt(state.todayMs); statusPanel.className = `status ${state.mode}`;
+  const target = dailyTargetMs(state.settings.workGoals, state.now);
+  todayValue.textContent = `${fmt(state.todayMs)}${target > 0 ? ` / ${fmt(target)}` : ''}`; statusPanel.className = `status ${state.mode}`;
   if (state.mode === 'work') { statusTitle.textContent = projectName(state.active?.projectId ?? null); statusDetail.textContent = `${t('working')} · ${fmt(state.now - (state.active?.start ?? state.now))}`; statusMark.textContent = '●'; }
   else if (state.mode === 'break') { statusTitle.textContent = t('manualBreak'); statusDetail.textContent = `${fmt(state.now - (state.active?.start ?? state.now))} · ${t('break')}`; statusMark.textContent = 'Ⅱ'; }
   else if (state.mode === 'pending') { statusTitle.textContent = t('pending'); statusDetail.textContent = t('pendingDetail'); statusMark.textContent = '?'; }
@@ -212,7 +219,8 @@ function dayMatches(a: number, b: number): boolean { const left = new Date(a), r
 function updateOverview(): void {
   const week = state.week; weekRange.textContent = `${shortDate(week.start)} – ${shortDate(week.end - 1)} ${new Date(week.end - 1).getFullYear()}`;
   nextWeekButton.disabled = weekOffset >= 0; currentWeekButton.disabled = weekOffset === 0;
-  workSummary.textContent = fmt(week.workTotal); breakSummary.textContent = fmt(week.breakTotal); projectSummary.textContent = String(week.rows.filter(row => row.total > 0).length);
+  const target = weeklyTargetMs(state.settings.workGoals);
+  workSummary.textContent = `${fmt(week.workTotal)}${target > 0 && weekOffset === 0 ? ` / ${fmt(target)}` : ''}`; breakSummary.textContent = fmt(week.breakTotal); projectSummary.textContent = String(week.rows.filter(row => row.total > 0).length);
   const signature = JSON.stringify({ start: week.start, rows: week.rows.map(row => ({ ...row, days: row.days.map(fmt), total: fmt(row.total) })), work: week.workDays.map(fmt), breaks: week.breakDays.map(fmt), totals: [fmt(week.workTotal), fmt(week.breakTotal)] });
   if (signature !== tableSignature) { tableSignature = signature; renderWeekTable(); }
   const records = state.records.filter(record => record.start < week.end && record.end > week.start).sort((a, b) => b.start - a.start);
@@ -273,12 +281,81 @@ function buildSettings(): void {
   for (const [input, label, help] of [[idle, 'idleThreshold', 'idleHelp'], [reminder, 'reminderInterval', 'reminderHelp']] as const) {
     const field = labelField(t(label), input, t(help)); const unit = el('div', 'input-unit'); input.replaceWith(unit); append(unit, input, el('span', '', t('minutes'))); timing.append(field);
   }
+  const goals = el('section', 'card settings-section work-goals-section');
+  const heading = el('header', 'work-goals-heading');
+  append(heading, el('h2', '', t('workGoals')), el('p', 'field-help', t('workGoalsIntro')));
+  const weekly = el('div', 'goal-week-summary'); weekly.setAttribute('aria-live', 'polite');
+  const weekLabel = el('div', 'goal-week-label'); const weekDays = el('small');
+  append(weekLabel, el('strong', '', t('weeklyTarget')), weekDays);
+  const weekValue = el('span', 'goal-week-value mono');
+  append(weekly, weekLabel, weekValue);
+  const days = el('div', 'workday-list');
+  const dayVisuals: { row: HTMLElement; meter: HTMLMeterElement; rest: HTMLElement }[] = [];
+  let remainingToggle: HTMLInputElement | undefined;
+  const hours = state.settings.workGoals.dailyHours.map((value, index) => {
+    const input = el('input'); input.type = 'text'; input.inputMode = 'decimal'; input.autocomplete = 'off'; input.id = `work-hours-${index}`;
+    input.setAttribute('aria-describedby', 'work-hours-help');
+    input.value = new Intl.NumberFormat(locale, { maximumFractionDigits: 15, useGrouping: false }).format(value);
+    const weekday = new Intl.DateTimeFormat(locale, { weekday: 'long', timeZone: 'UTC' }).format(Date.UTC(2026, 0, 5 + index));
+    const row = el('div', `workday-row${index === 5 ? ' weekend-start' : ''}`);
+    const label = el('label', 'workday-name', weekday); label.htmlFor = input.id;
+    const visual = el('div', 'workday-visual'); visual.setAttribute('aria-hidden', 'true');
+    const meter = el('meter', 'workday-meter'); meter.min = 0; meter.max = 8;
+    const rest = el('span', 'workday-rest', t('dayOff')); append(visual, meter, rest);
+    const unit = el('div', 'workday-hours'); const unitLabel = el('span', '', 'h'); unitLabel.setAttribute('aria-hidden', 'true');
+    append(unit, input, unitLabel); append(row, label, visual, unit); days.append(row);
+    dayVisuals.push({ row, meter, rest }); return input;
+  });
+  function updateWeeklyTarget(): void {
+    const values = hours.map(input => parseWorkHours(input.value));
+    if (remainingToggle) remainingToggle.disabled = !values.some(value => value !== null && value > 0);
+    weekValue.textContent = values.every(value => value !== null) ? `${fmt(values.reduce<number>((sum, value) => sum + hoursMs(value!), 0))} h` : '—';
+    weekDays.textContent = t('goalDays', { days: values.filter(value => value !== null && value > 0).length });
+    const maximum = Math.max(8, ...values.map(value => value ?? 0));
+    dayVisuals.forEach(({ row, meter, rest }, index) => {
+      const value = values[index];
+      row.classList.toggle('day-off', value === 0);
+      meter.max = maximum; meter.value = value ?? 0; meter.hidden = value === null || value === 0;
+      rest.hidden = value !== 0;
+      hours[index]!.setAttribute('aria-invalid', String(value === null));
+    });
+  }
+  updateWeeklyTarget();
+  const hoursHelp = el('p', 'work-hours-help', t('workGoalsHelp')); hoursHelp.id = 'work-hours-help';
+  const reminders = el('div', 'goal-reminders'); reminders.append(el('h3', '', t('goalReminders')));
+  function goalToggle(text: string, help: string, checked: boolean, id: string, parent: HTMLElement = reminders): HTMLInputElement {
+    const label = el('label', 'goal-toggle');
+    const description = el('span', 'goal-toggle-copy'); const title = el('strong', '', text); title.id = `${id}-label`;
+    const hint = el('small', '', help); hint.id = `${id}-help`; append(description, title, hint);
+    const control = el('span', 'goal-switch'); const input = el('input'); input.type = 'checkbox'; input.id = id; input.checked = checked;
+    input.setAttribute('role', 'switch'); input.setAttribute('aria-labelledby', title.id); input.setAttribute('aria-describedby', hint.id);
+    const track = el('span', 'goal-switch-track'); track.setAttribute('aria-hidden', 'true'); append(control, input, track);
+    append(label, description, control); parent.append(label); return input;
+  }
+  const display = el('div', 'goal-reminders'); display.append(el('h3', '', t('menuBarDisplay')));
+  remainingToggle = goalToggle(t('showRemaining'), t('showRemainingHelp'), state.settings.workGoals.showRemaining === true, 'show-remaining', display);
+  remainingToggle.disabled = !state.settings.workGoals.dailyHours.some(value => value > 0);
+  display.append(el('p', 'work-hours-help', t('showRemainingFallback')));
+  const notifyDaily = goalToggle(t('dailyGoalToggle'), t('dailyGoalHelp'), state.settings.workGoals.notifyDaily, 'notify-daily');
+  const notifyWeekly = goalToggle(t('weeklyGoalToggle'), t('weeklyGoalHelp'), state.settings.workGoals.notifyWeekly, 'notify-weekly');
+  const notificationHelp = el('details', 'goal-notification-help');
+  append(notificationHelp, el('summary', '', t('goalNotificationSummary')), el('p', 'field-help', t('goalNotificationHelp')));
+  append(goals, heading, weekly, days, hoursHelp, display, reminders, notificationHelp);
   const loginSection = el('section', 'card settings-section'); const loginLabel = el('label', 'setting-toggle'); const text = el('span'); loginDescription = el('small', '', t(!env.loginAvailable ? 'loginUnavailable' : env.launchAtLoginStatus === 'requires-approval' ? 'loginApproval' : 'loginHelp')); append(text, el('strong', '', t('launchAtLogin')), loginDescription);
   const login = el('input'); loginCheckbox = login; login.type = 'checkbox'; login.checked = env.launchAtLogin; login.disabled = !env.loginAvailable; loginLabel.append(text, login); loginSection.append(loginLabel);
   login.addEventListener('change', async () => { login.disabled = true; const result = await safe(window.timi.setLaunchAtLogin(login.checked)); if (result.ok) { login.checked = result.value; env.launchAtLogin = result.value; } else { login.checked = env.launchAtLogin; showError(result.error); } await refreshEnvironment(); });
-  const footer = el('div', 'settings-footer'); const saved = el('span', 'saved-status'); saved.setAttribute('role', 'status'); const save = markAction(button(t('saveSettings'), () => undefined, 'primary')); save.type = 'submit'; append(footer, saved, save); append(form, timing, loginSection, footer);
+  const footer = el('div', 'settings-footer'); const saved = el('span', 'saved-status'); saved.setAttribute('role', 'status'); const save = markAction(button(t('saveSettings'), () => undefined, 'primary')); save.type = 'submit'; append(footer, saved, save); append(form, goals, timing, loginSection, footer);
   function positiveMinutes(value: string): number | null { const input = value.trim(); if (!/^\d+$/.test(input)) return null; const number = Number(input); return number > 0 && Number.isSafeInteger(number) && Number.isSafeInteger(number * 60_000) ? number : null; }
-  form.addEventListener('submit', event => { event.preventDefault(); const idleMinutes = positiveMinutes(idle.value), reminderMinutes = positiveMinutes(reminder.value); if (idleMinutes === null || reminderMinutes === null) { showError(t('invalidSettings')); return; } void send({ type: 'settings', idleMinutes, reminderMinutes }).then(success => { if (success) { saved.textContent = t('saved'); idle.value = String(state.settings.idleMinutes); reminder.value = String(state.settings.reminderMinutes); } }); });
+  form.addEventListener('submit', event => {
+    event.preventDefault(); const idleMinutes = positiveMinutes(idle.value), reminderMinutes = positiveMinutes(reminder.value);
+    if (idleMinutes === null || reminderMinutes === null) { showError(t('invalidSettings')); return; }
+    const dailyHours = hours.map(input => parseWorkHours(input.value));
+    if (dailyHours.some(value => value === null)) { showError(t('invalidWorkHours')); return; }
+    void send({ type: 'settings', idleMinutes, reminderMinutes, workGoals: { dailyHours: dailyHours as number[], notifyDaily: notifyDaily.checked, notifyWeekly: notifyWeekly.checked, showRemaining: remainingToggle!.checked } }).then(success => {
+      if (success) { saved.textContent = t('saved'); idle.value = String(state.settings.idleMinutes); reminder.value = String(state.settings.reminderMinutes); }
+    });
+  });
+  for (const input of [...hours, notifyDaily, notifyWeekly, remainingToggle]) input.addEventListener('input', () => { saved.textContent = ''; updateWeeklyTarget(); });
   idle.addEventListener('input', () => { saved.textContent = ''; }); reminder.addEventListener('input', () => { saved.textContent = ''; });
   append(page, form, el('p', 'privacy-note', t('privacy')), el('p', 'privacy-note', t('version', { version: env.version }))); content.replaceChildren(page);
 }

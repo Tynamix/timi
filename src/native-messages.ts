@@ -1,6 +1,9 @@
 import type { Locale } from './shared';
 export const nativeMessages = {
   en: {
+    remainingToday: 'Remaining today',
+    dailyGoalTitle: 'Daily working time reached', dailyGoalBody: 'You have reached your daily target of {time} hours.',
+    weeklyGoalTitle: 'Weekly working time reached', weeklyGoalBody: 'You have reached your weekly target of {time} hours.',
     today: 'Today', work: 'Working', break: 'On break', pending: 'Time needs clarification', stopped: 'Not tracking',
     overview: 'Weekly overview', settings: 'Settings', quit: 'Quit timi', entry: 'Choose a project', stop: 'Stop tracking',
     startup: 'timi could not open its time records. Your data has not been replaced. Check that the data folder is accessible and that no other timi version is running, then try again.',
@@ -10,6 +13,9 @@ export const nativeMessages = {
     retry: 'Retry', stayOpen: 'Keep timi open', exit: 'Close', edit: 'Edit', undo: 'Undo', redo: 'Redo', cut: 'Cut', copy: 'Copy', paste: 'Paste', selectAll: 'Select All',
   },
   de: {
+    remainingToday: 'Heute verbleibend',
+    dailyGoalTitle: 'Tagesarbeitszeit erreicht', dailyGoalBody: 'Du hast dein Tagesziel von {time} Stunden erreicht.',
+    weeklyGoalTitle: 'Wochenarbeitszeit erreicht', weeklyGoalBody: 'Du hast dein Wochenziel von {time} Stunden erreicht.',
     today: 'Heute', work: 'Arbeit läuft', break: 'Pause läuft', pending: 'Zeit muss zugeordnet werden', stopped: 'Keine Zeiterfassung',
     overview: 'Wochenübersicht', settings: 'Einstellungen', quit: 'timi beenden', entry: 'Projekt auswählen', stop: 'Zeiterfassung stoppen',
     startup: 'timi konnte die Zeitdaten nicht öffnen. Deine Daten wurden nicht ersetzt. Prüfe den Zugriff auf den Datenordner und ob eine andere timi-Version läuft. Versuche es dann erneut.',

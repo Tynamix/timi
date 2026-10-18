@@ -25,6 +25,12 @@ After five minutes without native keyboard, mouse, or trackpad activity, the com
 
 After ten minutes of active use without tracking, an entry reminder offers a project, Later, or Start break. Nothing is backfilled. Manual breaks suppress both kinds of reminder. Both thresholds can be configured independently in Settings using positive whole minutes.
 
+In **Settings → Working time targets**, set hours for Monday through Sunday, for example Monday **7.6**, Tuesday **8**, Saturday **4**, and Sunday **0** (a day off). Decimal commas and points both work; 7.6 hours means 7 hours 36 minutes. The weekly target is the sum of all seven days. Targets start at zero until you configure them. Today's entry and the current weekly overview show worked time alongside the target.
+
+The **Menu bar → Show remaining working time** switch selects the status-item timer: off shows time worked today; on counts down to today's target, reaches **0:00**, then shows overtime as negative time (for example **−0:15** for 15 extra minutes). A partial remaining minute is rounded up so the display does not show zero early. Overtime shows completed minutes, with **−0:00** during the first partial overtime minute. Without a target for the current day, it shows worked time. Configure at least one working day to enable the switch. The choice persists across restarts; hovering over the menu-bar timer also shows today's worked time.
+
+Daily and weekly target notifications can be enabled separately. timi sends a native macOS notification when confirmed working time reaches each target, once per local day or Monday–Sunday week, including across restarts. Breaks and unresolved idle/recovery time are excluded; ongoing work counts through the last confirmed activity. Resolving time as work or correcting records can also reach a target. Changing targets or correcting time does not repeat a notification already shown in that period. Tracking continues after a target is reached. Allow timi under **System Settings → Notifications** to see notifications; macOS Focus and notification preferences control presentation. Clicking a notification opens the weekly overview.
+
 ## Reports and corrections
 
 Open **Weekly overview** from entry or the menu-bar context menu. Browse this week and prior weeks. Only projects with working time in the selected week appear as rows, including archived projects with time in that week. Work is grouped by project and Monday–Sunday; breaks have separate totals. The indicator and reports share the same accounting functions. Records are split at current local calendar boundaries, including DST, using actual elapsed milliseconds. Displayed H:MM totals truncate only after summing milliseconds; there is no commercial rounding.
@@ -72,6 +78,8 @@ The app uses SQLite transactions, WAL, full synchronous writes, and macOS full-f
 An intentional quit saves through the quit instant, ends tracking, and records a clean exit. A crash is durably distinguishable from a clean exit. On restart, certain saved work is retained; recoverable uncertainty is bounded by the latest durable checkpoint, never the restart time. One question allows work, break, or discard; only crash recovery allows a different project. Existing unanswered idle questions retain their original project and fixed endpoint. Nothing resumes automatically. Time after the last durable checkpoint cannot be inferred and can be added explicitly through corrections.
 
 The earlier unversioned timi schema (`projects`, `periods`, `breaks`, `idle_periods`, `settings`) is migrated in one transaction. A consistent `tracking.sqlite.pre-v1-….sqlite` backup is created first and the original tables are retained. Stable project identities, existing endpoints, settings, and unanswered questions survive. Unknown schemas, invalid rows, and unreadable databases are refused; the app never resets them. Quit the older timi version before opening this version and do not run both against one database. To back up manually, quit timi and copy the whole data directory.
+
+Schema v1 databases receive a consistent `tracking.sqlite.pre-v2-….sqlite` backup before the atomic upgrade for work targets and notification receipts. Receipt writes leave the durable tracking checkpoint unchanged.
 
 ## Architecture and privacy
 

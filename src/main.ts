@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, powerMonitor, screen, session, Tray } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, powerMonitor, screen, session, Tray } from 'electron';
 import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -6,6 +6,8 @@ import { SqliteStore } from './core/store';
 import { TrackingApplication } from './core/application';
 import { isCommand } from './validation';
 import { detectLocale, nativeMessages } from './native-messages';
+import { statusTime } from './status-time';
+import { GoalReceiptQueue } from './goal-receipts';
 import type { AppError, Environment, Locale, Result, Snapshot, WindowKind } from './shared';
 
 app.setName('timi');
@@ -31,6 +33,9 @@ let sleeping = false;
 let stickyError: AppError | null = null;
 let presentedPending: string | null = null;
 let reminderPresented = false;
+const goalNotifications = new Map<string, Notification>();
+const goalReceipts = new GoalReceiptQueue(notice => tracking!.acknowledgeWorkGoalNotice(notice), report);
+const goalRetryAt = new Map<string, number>();
 const windows = new Map<WindowKind, BrowserWindow>();
 const loaded = new Set<WindowKind>();
 const pageURL = pathToFileURL(join(__dirname, 'index.html')).href;
@@ -64,7 +69,7 @@ function sample(): void {
 function makeWindow(kind: WindowKind): BrowserWindow {
   const existing = windows.get(kind);
   if (existing && !existing.isDestroyed()) return existing;
-  const sizes: Record<WindowKind, [number, number]> = { entry: [440, 570], overview: [1120, 780], settings: [540, 610], clarification: [580, 570] };
+  const sizes: Record<WindowKind, [number, number]> = { entry: [440, 570], overview: [1120, 780], settings: [540, 790], clarification: [580, 570] };
   const [width, height] = sizes[kind];
   const win = new BrowserWindow({
     width, height, minWidth: kind === 'overview' ? 900 : width, minHeight: kind === 'overview' ? 640 : height,
@@ -152,10 +157,34 @@ function refresh(): void {
   if (!tracking || quitting) return;
   const state = tracking.getSnapshot();
   const status = state.pending ? msg().pending : state.mode === 'break' ? msg().break : state.mode === 'work' ? msg().work : msg().stopped;
-  tray?.setTitle(`${stickyError || state.pending ? '! ' : state.mode === 'break' ? 'Ⅱ ' : state.mode === 'untracked' ? '■ ' : ''}${time(state.todayMs)}`, { fontType: 'monospacedDigit' });
-  tray?.setToolTip(`timi · ${msg().today}: ${time(state.todayMs)}\n${stickyError ? nativeErrorText(stickyError) : status}`);
+  const display = statusTime(state);
+  tray?.setTitle(`${stickyError || state.pending ? '! ' : state.mode === 'break' ? 'Ⅱ ' : state.mode === 'untracked' ? '■ ' : ''}${display.text}`, { fontType: 'monospacedDigit' });
+  tray?.setToolTip(`timi · ${display.remaining ? `${msg().remainingToday}: ${display.text}\n` : ''}${msg().today}: ${time(state.todayMs)}\n${stickyError ? nativeErrorText(stickyError) : status}`);
   for (const win of windows.values()) if (!win.isDestroyed()) win.webContents.send('timi:changed');
   syncWindows(state);
+  syncGoalNotifications(state);
+}
+function syncGoalNotifications(state: Snapshot): void {
+  if (!tracking) return;
+  try {
+    goalReceipts.flush();
+    if (stickyError || !state.canPresent || locked || sleeping || !Notification.isSupported()) return;
+    for (const notice of tracking.getWorkGoalNotices()) {
+      const key = `${notice.kind}:${notice.period}`;
+      if (goalNotifications.has(key) || goalReceipts.has(notice) || (goalRetryAt.get(key) ?? 0) > state.now) continue;
+      const notification = new Notification({
+        title: notice.kind === 'day' ? msg().dailyGoalTitle : msg().weeklyGoalTitle,
+        body: (notice.kind === 'day' ? msg().dailyGoalBody : msg().weeklyGoalBody).replace('{time}', time(notice.targetMs)),
+      });
+      goalNotifications.set(key, notification);
+      notification.once('show', () => { goalReceipts.recordShown(notice); });
+      notification.once('close', () => { goalNotifications.delete(key); });
+      notification.once('failed', () => { goalNotifications.delete(key); goalRetryAt.set(key, Date.now() + 60_000); });
+      notification.on('click', () => { foreground(makeWindow('overview'), 'overview'); });
+      try { notification.show(); }
+      catch { goalNotifications.delete(key); goalRetryAt.set(key, Date.now() + 60_000); }
+    }
+  } catch (error) { report(error); }
 }
 function attemptQuit(): void {
   if (quitting) return;
