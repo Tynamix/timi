@@ -40,14 +40,17 @@ export type Command =
 export interface NativeSample { idleMs: number; locked: boolean; sleeping: boolean }
 export interface AppError { code: string; details?: Record<string, string | number> }
 export type Result<T> = { ok: true; value: T } | { ok: false; error: AppError };
-export type WindowKind = 'entry' | 'overview' | 'settings' | 'clarification';
+export type WorkspaceView = 'overview' | 'settings';
+export type WindowKind = 'entry' | 'overview' | 'clarification';
 export interface Environment { locale: Locale; version: string; loginAvailable: boolean; launchAtLogin: boolean; launchAtLoginStatus: 'not-registered' | 'enabled' | 'requires-approval' | 'not-found'; packaged: boolean }
 export interface DesktopAPI {
   snapshot(weekOffset?: number): Promise<Result<Snapshot>>;
   command(command: Command): Promise<Result<Snapshot>>;
   environment(): Promise<Result<Environment>>;
   setLaunchAtLogin(enabled: boolean): Promise<Result<boolean>>;
-  openWindow(kind: 'overview' | 'settings'): Promise<Result<void>>;
+  openWindow(view: WorkspaceView): Promise<Result<void>>;
+  workspaceView(): Promise<Result<WorkspaceView>>;
+  onNavigate(callback: (view: WorkspaceView) => void): () => void;
   closeWindow(): Promise<Result<void>>;
   quit(): Promise<Result<void>>;
   onChanged(callback: () => void): () => void;

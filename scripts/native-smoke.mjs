@@ -85,10 +85,13 @@ async function visible(application, kind) {
 }
 
 async function getWindow(application, kind) {
+  const view = kind === 'settings' ? 'settings' : kind === 'overview' ? 'overview' : null;
+  if (kind === 'settings') kind = 'overview';
   await eventually(() => application.windows().some(page => page.url().endsWith(`window=${kind}`)), `${kind} created`);
   const page = application.windows().find(page => page.url().endsWith(`window=${kind}`));
   page.on('pageerror', error => issues.push(String(error)));
   await page.waitForSelector('#app[aria-busy="false"]');
+  if (view) await page.locator(`.${view}-page`).waitFor({ state: 'visible' });
   return page;
 }
 
@@ -245,6 +248,32 @@ try {
   try { await eventually(async () => !(await visible(f.application, 'entry')), 'outside focus hides entry'); }
   catch (error) { console.log(JSON.stringify(await windowDiagnostics(f.application), null, 2)); throw error; }
   await settings.locator('#idle-minutes').fill('2');
+  const workspaceId = await f.application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(window => window.webContents.getURL().endsWith('window=overview')).id);
+  await settings.getByRole('button', { name: '‹ Week overview', exact: true }).click();
+  await settings.locator('.overview-page').waitFor({ state: 'visible' });
+  const currentWeek = await settings.locator('.week-range').textContent();
+  await settings.getByRole('button', { name: 'Previous week', exact: true }).click();
+  await eventually(async () => (await settings.locator('.week-range').textContent()) !== currentWeek, 'previous week loaded');
+  const selectedWeek = await settings.locator('.week-range').textContent();
+  await settings.getByRole('button', { name: 'Settings', exact: true }).click();
+  await settings.locator('.settings-page').waitFor({ state: 'visible' });
+  assert.equal(await settings.locator('#idle-minutes').inputValue(), '2');
+  await settings.getByRole('button', { name: '‹ Week overview', exact: true }).click();
+  await settings.locator('.overview-page').waitFor({ state: 'visible' });
+  assert.equal(await settings.locator('.week-range').textContent(), selectedWeek);
+  await settings.getByRole('button', { name: 'This week', exact: true }).click();
+  await showEntry(f);
+  await entry.getByRole('button', { name: 'Settings', exact: true }).click();
+  await settings.locator('.settings-page').waitFor({ state: 'visible' });
+  assert.equal(await settings.locator('#idle-minutes').inputValue(), '2');
+  assert.deepEqual(await f.application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter(window => /window=(overview|settings)$/.test(window.webContents.getURL())).map(window => window.id)), [workspaceId]);
+  await settings.evaluate(() => window.timi.closeWindow());
+  await eventually(async () => !(await visible(f.application, 'overview')), 'shared workspace closes');
+  await showEntry(f);
+  await entry.getByRole('button', { name: 'Settings', exact: true }).click();
+  await settings.locator('.settings-page').waitFor({ state: 'visible' });
+  assert.equal(await settings.locator('#idle-minutes').inputValue(), '2');
+  record('Tracker direct settings, overview Settings button and Back reuse one window; drafts and selected week survive navigation and closing');
   await settings.locator('#reminder-minutes').fill('3');
   for (const [index, hours] of ['7,6', '8', '8', '8', '8', '4', '0'].entries()) await settings.locator(`#work-hours-${index}`).fill(hours);
   await settings.getByRole('switch', { name: 'Show remaining working time', exact: true }).check();
@@ -284,6 +313,14 @@ try {
   await overview.locator('.editor input[type="datetime-local"]').nth(0).fill(localInput(current.now - 3 * 3_600_000));
   await overview.locator('.editor input[type="datetime-local"]').nth(1).fill(localInput(current.now - 2 * 3_600_000));
   await overview.locator('.editor select[data-field="project"]').selectOption(alpha);
+  const draftStart = await overview.locator('.editor input[type="datetime-local"]').nth(0).inputValue();
+  await entry.evaluate(() => window.timi.openWindow('settings'));
+  await overview.locator('.settings-page').waitFor({ state: 'visible' });
+  assert.equal(await overview.locator('dialog[open]').count(), 0);
+  await overview.getByRole('button', { name: '‹ Week overview', exact: true }).click();
+  await overview.locator('dialog[open]').waitFor();
+  assert.equal(await overview.locator('.editor input[type="datetime-local"]').nth(0).inputValue(), draftStart);
+  record('External settings navigation suspends and restores the correction editor without losing its draft');
   await overview.getByRole('button', { name: 'Save changes', exact: true }).click();
   await eventually(() => overview.locator('dialog[open]').count().then(count => count === 0), 'correction saved');
   const correctionRows = () => overview.locator('.records-table tbody tr').filter({ hasText: 'Correction' });
@@ -330,8 +367,9 @@ try {
   assert.equal(await visible(f.application, 'clarification'), true);
   assert.equal((await state(entry)).pending.id, pendingId);
   await entry.evaluate(() => window.timi.openWindow('settings'));
+  await settings.locator('.settings-page').waitFor({ state: 'visible' });
   await pause(2_200);
-  assert.equal(await f.application.evaluate(({ BrowserWindow }) => BrowserWindow.getFocusedWindow()?.webContents.getURL().endsWith('window=settings')), true);
+  assert.equal(await f.application.evaluate(({ BrowserWindow }) => BrowserWindow.getFocusedWindow()?.webContents.getURL().endsWith('window=overview')), true);
   await clock(f, 5 * 60_000, 5 * 60);
   await command(entry, { type: 'settings', idleMinutes: 2, reminderMinutes: 3 });
   assert.equal((await state(entry)).canPresent, true);

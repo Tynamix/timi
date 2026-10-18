@@ -1,7 +1,7 @@
 import { localDateInput, possibleLocalTimes } from './time-input';
 import { parseWorkHours } from './work-hours';
 import { dailyTargetMs, hoursMs, weeklyTargetMs } from '../core/work-goals';
-import type { AppError, Command, Environment, Locale, Project, RecordInput, Result, Snapshot, TimeRecord, WindowKind } from '../shared';
+import type { AppError, Command, Environment, Locale, Project, RecordInput, Result, Snapshot, TimeRecord, WindowKind, WorkspaceView } from '../shared';
 
 const en = {
   menuBarDisplay: 'Menu bar', showRemaining: 'Show remaining working time', showRemainingHelp: 'Off: worked time. On: time left until your daily target.', showRemainingFallback: 'Without a daily target, worked time is shown. Overtime appears with a minus sign.',
@@ -42,7 +42,11 @@ let queuedRefresh = false;
 let projectSignature = '';
 let editorAlert: HTMLElement | null = null;
 const rawKind = new URLSearchParams(location.search).get('window');
-const kind: WindowKind = rawKind === 'overview' || rawKind === 'settings' || rawKind === 'clarification' ? rawKind : 'entry';
+const kind: WindowKind = rawKind === 'overview' || rawKind === 'clarification' ? rawKind : 'entry';
+let workspaceView: WorkspaceView = 'overview';
+let overviewPage: HTMLElement;
+let settingsPage: HTMLElement;
+const viewScroll = { overview: 0, settings: 0 };
 const app = document.querySelector<HTMLElement>('#app')!;
 const errors = document.createElement('div');
 errors.setAttribute('role', 'alert');
@@ -204,7 +208,18 @@ function buildOverview(): void {
   const page = el('div', 'page overview-page'); const header = el('header', 'page-header row between'); const title = el('div'); append(title, el('h1', '', t('weekTitle')), el('p', 'muted tiny', t('weekSubtitle')));
   const navigation = el('nav', 'week-navigation'); const previous = button('‹', async () => { weekOffset--; await refresh(); }, 'icon'); previous.setAttribute('aria-label', t('previousWeek'));
   nextWeekButton = button('›', async () => { weekOffset++; await refresh(); }, 'icon'); nextWeekButton.setAttribute('aria-label', t('nextWeek')); weekRange = el('span', 'week-range');
-  currentWeekButton = button(t('thisWeek'), async () => { weekOffset = 0; await refresh(); }); append(navigation, previous, weekRange, nextWeekButton, currentWeekButton); append(header, title, navigation);
+  currentWeekButton = button(t('thisWeek'), async () => { weekOffset = 0; await refresh(); });
+  append(navigation, previous, weekRange, nextWeekButton, currentWeekButton);
+  const settings = button(t('settings'), () => nativeAction(window.timi.openWindow('settings')), 'workspace-settings');
+  const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  icon.setAttribute('viewBox', '0 0 24 24'); icon.setAttribute('aria-hidden', 'true'); icon.setAttribute('focusable', 'false');
+  icon.setAttribute('fill', 'none'); icon.setAttribute('stroke', 'currentColor'); icon.setAttribute('stroke-width', '1.7'); icon.setAttribute('stroke-linecap', 'round');
+  const lines = document.createElementNS(icon.namespaceURI, 'path'); lines.setAttribute('d', 'M3 5h5m4 0h9M3 12h10m4 0h4M3 19h2m4 0h12'); icon.append(lines);
+  for (const [x, y] of [[10, 5], [15, 12], [7, 19]]) {
+    const circle = document.createElementNS(icon.namespaceURI, 'circle'); circle.setAttribute('cx', String(x)); circle.setAttribute('cy', String(y)); circle.setAttribute('r', '2'); icon.append(circle);
+  }
+  settings.prepend(icon);
+  const actions = el('div', 'overview-header-actions'); append(actions, navigation, settings); append(header, title, actions);
   const summaries = el('section', 'summary-grid');
   function summary(title: string, caption: string): HTMLElement { const card = el('div', 'card summary-card'); const value = el('div', 'summary-number mono'); append(card, el('div', 'eyebrow', title), value, el('p', 'muted summary-caption', caption)); summaries.append(card); return value; }
   workSummary = summary(t('workTotal'), t('actualTime')); breakSummary = summary(t('breaks'), t('breaksSeparate')); projectSummary = summary(t('trackedProjects'), t('projectsThisWeek'));
@@ -213,7 +228,25 @@ function buildOverview(): void {
   const manager = el('details', 'card projects-panel'); append(manager, el('summary', '', t('manageProjects')), el('p', 'field-help', t('manageHelp'))); managerList = el('div', 'project-manager-list'); manager.append(managerList);
   const createRow = el('form', 'project-create-row'); const name = el('input'); name.placeholder = t('newProjectName'); name.setAttribute('aria-label', t('newProjectName')); name.autocomplete = 'off'; const create = markAction(button(t('createProject'), () => undefined)); create.type = 'submit'; append(createRow, name, create);
   createRow.addEventListener('submit', event => { event.preventDefault(); if (!name.value.trim()) { showError(t('projectNameRequired')); name.focus(); return; } void send({ type: 'createProject', name: name.value }).then(success => { if (success) name.value = ''; }); }); manager.append(createRow);
-  append(page, header, summaries, weekTable, note, recordsHeader, recordTable, manager); content.replaceChildren(page);
+  append(page, header, summaries, weekTable, note, recordsHeader, recordTable, manager); overviewPage = page; content.append(page);
+}
+function showWorkspaceView(view: WorkspaceView): void {
+  if (view !== 'overview' && view !== 'settings') return;
+  if (!overviewPage || !settingsPage) { workspaceView = view; return; }
+  const changed = workspaceView !== view;
+  if (changed) viewScroll[workspaceView] = window.scrollY;
+  workspaceView = view;
+  overviewPage.hidden = view !== 'overview'; settingsPage.hidden = view !== 'settings';
+  document.title = `timi · ${t(view)}`;
+  // Keep correction drafts mounted while their modal is suspended in settings.
+  if (view === 'settings') { editorDialog?.close(); void refreshEnvironment(); }
+  else if (editorDialog && !editorDialog.open) editorDialog.showModal();
+  update();
+  if (changed) {
+    window.scrollTo(0, viewScroll[view]);
+    const heading = (view === 'overview' ? overviewPage : settingsPage).querySelector('h1')!;
+    heading.tabIndex = -1; heading.focus({ preventScroll: true });
+  }
 }
 function dayMatches(a: number, b: number): boolean { const left = new Date(a), right = new Date(b); return left.getFullYear() === right.getFullYear() && left.getMonth() === right.getMonth() && left.getDate() === right.getDate(); }
 function updateOverview(): void {
@@ -274,8 +307,12 @@ async function refreshEnvironment(): Promise<void> {
   if (loginDescription) loginDescription.textContent = t(!env.loginAvailable ? 'loginUnavailable' : env.launchAtLoginStatus === 'requires-approval' ? 'loginApproval' : 'loginHelp');
 }
 function buildSettings(): void {
-  const page = el('div', 'page settings-page'); append(page, el('h1', '', t('settingsTitle')), el('p', 'settings-intro muted', t('settingsIntro')));
-  const form = el('form'); const timing = el('section', 'card settings-section');
+  const page = el('div', 'page settings-page');
+  const header = el('header', 'page-header row between');
+  const title = el('div'); append(title, el('h1', '', t('settingsTitle')), el('p', 'muted tiny', t('settingsIntro')));
+  append(header, title, button(`‹ ${t('overview')}`, () => nativeAction(window.timi.openWindow('overview')))); page.append(header);
+  const form = el('form', 'settings-form'); const timing = el('section', 'card settings-section');
+  timing.append(el('h2', 'settings-section-title', t('timing')));
   const idle = el('input'); idle.type = 'text'; idle.inputMode = 'numeric'; idle.value = String(state.settings.idleMinutes); idle.autocomplete = 'off'; idle.id = 'idle-minutes';
   const reminder = el('input'); reminder.type = 'text'; reminder.inputMode = 'numeric'; reminder.value = String(state.settings.reminderMinutes); reminder.autocomplete = 'off'; reminder.id = 'reminder-minutes';
   for (const [input, label, help] of [[idle, 'idleThreshold', 'idleHelp'], [reminder, 'reminderInterval', 'reminderHelp']] as const) {
@@ -340,11 +377,19 @@ function buildSettings(): void {
   const notifyWeekly = goalToggle(t('weeklyGoalToggle'), t('weeklyGoalHelp'), state.settings.workGoals.notifyWeekly, 'notify-weekly');
   const notificationHelp = el('details', 'goal-notification-help');
   append(notificationHelp, el('summary', '', t('goalNotificationSummary')), el('p', 'field-help', t('goalNotificationHelp')));
-  append(goals, heading, weekly, days, hoursHelp, display, reminders, notificationHelp);
+  append(goals, heading, weekly, days, hoursHelp, display);
+  const preferences = el('section', 'card settings-section'); append(preferences, reminders, notificationHelp);
   const loginSection = el('section', 'card settings-section'); const loginLabel = el('label', 'setting-toggle'); const text = el('span'); loginDescription = el('small', '', t(!env.loginAvailable ? 'loginUnavailable' : env.launchAtLoginStatus === 'requires-approval' ? 'loginApproval' : 'loginHelp')); append(text, el('strong', '', t('launchAtLogin')), loginDescription);
   const login = el('input'); loginCheckbox = login; login.type = 'checkbox'; login.checked = env.launchAtLogin; login.disabled = !env.loginAvailable; loginLabel.append(text, login); loginSection.append(loginLabel);
   login.addEventListener('change', async () => { login.disabled = true; const result = await safe(window.timi.setLaunchAtLogin(login.checked)); if (result.ok) { login.checked = result.value; env.launchAtLogin = result.value; } else { login.checked = env.launchAtLogin; showError(result.error); } await refreshEnvironment(); });
-  const footer = el('div', 'settings-footer'); const saved = el('span', 'saved-status'); saved.setAttribute('role', 'status'); const save = markAction(button(t('saveSettings'), () => undefined, 'primary')); save.type = 'submit'; append(footer, saved, save); append(form, goals, timing, loginSection, footer);
+  const footer = el('div', 'settings-footer');
+  const info = el('div', 'settings-footer-info');
+  const saved = el('span', 'saved-status'); saved.setAttribute('role', 'status');
+  append(info, el('p', 'privacy-note', t('privacy')), el('p', 'privacy-note', t('version', { version: env.version })), saved);
+  const save = markAction(button(t('saveSettings'), () => undefined, 'primary')); save.type = 'submit'; append(footer, info, save);
+  const schedule = el('div', 'settings-side'); append(schedule, goals);
+  const preferencesSide = el('div', 'settings-side'); append(preferencesSide, timing, preferences, loginSection);
+  append(form, schedule, preferencesSide, footer);
   function positiveMinutes(value: string): number | null { const input = value.trim(); if (!/^\d+$/.test(input)) return null; const number = Number(input); return number > 0 && Number.isSafeInteger(number) && Number.isSafeInteger(number * 60_000) ? number : null; }
   form.addEventListener('submit', event => {
     event.preventDefault(); const idleMinutes = positiveMinutes(idle.value), reminderMinutes = positiveMinutes(reminder.value);
@@ -357,7 +402,7 @@ function buildSettings(): void {
   });
   for (const input of [...hours, notifyDaily, notifyWeekly, remainingToggle]) input.addEventListener('input', () => { saved.textContent = ''; updateWeeklyTarget(); });
   idle.addEventListener('input', () => { saved.textContent = ''; }); reminder.addEventListener('input', () => { saved.textContent = ''; });
-  append(page, form, el('p', 'privacy-note', t('privacy')), el('p', 'privacy-note', t('version', { version: env.version }))); content.replaceChildren(page);
+  page.append(form); settingsPage = page; content.append(page);
 }
 
 let clarificationDescription: HTMLElement;
@@ -417,7 +462,7 @@ function openEditor(record?: TimeRecord): void {
     append(deleteButtons, button(t('confirmDelete'), async () => { if (busy) return; save.disabled = true; if (await send({ type: 'correct', removeIds: [record.id], records: [] })) closeEditor(); else save.disabled = false; }, 'danger'), button(t('keepRecord'), () => { deleteConfirm.hidden = true; })); deleteConfirm.append(deleteButtons);
   }
   function closeEditor(): void { dialog.close(); dialog.remove(); if (editorDialog === dialog) { editorDialog = null; editorAlert = null; } }
-  dialog.addEventListener('close', () => { dialog.remove(); if (editorDialog === dialog) { editorDialog = null; editorAlert = null; } });
+  dialog.addEventListener('cancel', event => { event.preventDefault(); closeEditor(); });
   function collect(): RecordInput[] | null {
     const result: RecordInput[] = [];
     for (const segment of segments) {
@@ -469,16 +514,21 @@ document.addEventListener('keydown', event => {
 
 async function initialize(): Promise<void> {
   content.append(el('div', 'loading', t('loading')));
-  const [environmentResult, snapshotResult] = await Promise.all([safe(window.timi.environment()), safe(window.timi.snapshot())]);
-  if (!environmentResult.ok || !snapshotResult.ok) {
+  const [environmentResult, snapshotResult, viewResult] = await Promise.all([safe(window.timi.environment()), safe(window.timi.snapshot()), kind === 'overview' ? safe(window.timi.workspaceView()) : Promise.resolve(null)]);
+  if (!environmentResult.ok || !snapshotResult.ok || (viewResult && !viewResult.ok)) {
     app.setAttribute('aria-busy', 'false'); if (environmentResult.ok) locale = environmentResult.value.locale;
     content.replaceChildren(el('div', 'loading')); content.firstChild?.appendChild(button(t('refresh'), initialize));
-    showError(!environmentResult.ok ? environmentResult.error : !snapshotResult.ok ? snapshotResult.error : { code: 'STORAGE_ERROR' }); return;
+    showError(!environmentResult.ok ? environmentResult.error : !snapshotResult.ok ? snapshotResult.error : viewResult && !viewResult.ok ? viewResult.error : { code: 'STORAGE_ERROR' }); return;
   }
-  env = environmentResult.value; locale = env.locale; state = snapshotResult.value; document.documentElement.lang = locale; app.setAttribute('aria-busy', 'false'); document.title = kind === 'entry' ? 'timi' : `timi · ${t(kind === 'overview' ? 'overview' : kind === 'settings' ? 'settings' : 'clarificationTitle')}`;
-  if (kind === 'entry') buildEntry(); else if (kind === 'overview') buildOverview(); else if (kind === 'settings') buildSettings(); else buildClarification();
+  env = environmentResult.value; locale = env.locale; state = snapshotResult.value; document.documentElement.lang = locale; app.setAttribute('aria-busy', 'false'); document.title = kind === 'entry' ? 'timi' : `timi · ${t(kind === 'overview' ? 'overview' : 'clarificationTitle')}`;
+  if (kind === 'entry') buildEntry();
+  else if (kind === 'overview') {
+    content.replaceChildren(); buildOverview(); buildSettings();
+    showWorkspaceView(viewResult?.ok ? viewResult.value : workspaceView);
+  } else buildClarification();
   update(); if (kind === 'entry') entryInput.focus();
-  window.timi.onChanged(() => { void refresh(); }); window.timi.onError(showError); window.timi.onFocus(() => { if (kind === 'entry') entryInput.focus(); if (kind === 'settings') void refreshEnvironment(); void refresh(); });
+  window.timi.onChanged(() => { void refresh(); }); window.timi.onError(showError); window.timi.onFocus(() => { if (kind === 'entry') entryInput.focus(); if (kind === 'overview' && workspaceView === 'settings') void refreshEnvironment(); void refresh(); });
   setInterval(() => { if (!document.hidden && !busy) void refresh(); }, 1000);
 }
+if (kind === 'overview') window.timi.onNavigate(showWorkspaceView);
 void initialize();
