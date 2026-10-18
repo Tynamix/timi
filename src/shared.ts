@@ -4,7 +4,10 @@ export type RecordKind = 'work' | 'break';
 export interface Project { id: string; name: string; archived: boolean }
 export interface TimeRecord { id: string; start: number; end: number; kind: RecordKind; projectId: string | null; source: 'manual' | 'tracked' | 'idle' | 'recovery' }
 export interface RecordInput { start: number; end: number; kind: RecordKind; projectId: string | null }
-export interface Settings { idleMinutes: number; reminderMinutes: number }
+/** Monday through Sunday; zero hours means a day off. */
+export interface WorkGoals { dailyHours: number[]; notifyDaily: boolean; notifyWeekly: boolean }
+export interface WorkGoalNotice { kind: 'day' | 'week'; period: string; targetMs: number; workedMs: number }
+export interface Settings { idleMinutes: number; reminderMinutes: number; workGoals: WorkGoals }
 export interface ActivePeriod { kind: RecordKind; start: number; projectId: string | null }
 export interface PendingPeriod { id: string; start: number; end: number | null; projectId: string | null; reason: 'idle' | 'recovery'; resume: boolean }
 export interface WeekReport {
@@ -26,7 +29,7 @@ export type Command =
   | { type: 'stop' }
   | { type: 'later' }
   | { type: 'resolve'; choice: 'work' | 'break' | 'discard'; pendingId?: string; projectId?: string; projectName?: string }
-  | { type: 'settings'; idleMinutes: number; reminderMinutes: number }
+  | { type: 'settings'; idleMinutes: number; reminderMinutes: number; workGoals?: WorkGoals }
   | { type: 'renameProject'; id: string; name: string }
   | { type: 'archiveProject'; id: string; archived: boolean }
   | { type: 'correct'; removeIds: string[]; records: RecordInput[] };

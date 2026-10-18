@@ -1,5 +1,7 @@
 # Verification
 
+Work-target update verified on 18 October 2026: `npm run check` passes with **73 tests**. `npm run test:native` passes against the development build, including decimal weekday settings, native notification wiring, and durable notification receipts. English and German settings screenshots were visually reviewed. The goal-notification display was mocked; actual macOS banners, permission prompts and Focus behavior require a manual check. The packaged app was not rebuilt for this update. Added coverage includes target validation, failed settings/receipt writes and retries, v1 migration and rollback, restart deduplication, midnight/Monday resets, future correction endpoints, and elapsed target time across DST. Notification receipts do not advance the durable tracking checkpoint.
+
 Verified on 17 October 2026, on an Apple Silicon Mac running Darwin 27, using Electron 44.7.2. Tests use isolated temporary data folders; the user's normal time records and login items were not modified.
 
 Version 1.0.1 filters weekly project rows to projects with positive working time in the selected week. Typechecking and all 60 tests pass for this update. The universal app was rebuilt and its signature and bundled code verified. The full native smoke results below are from version 1.0.0; that suite was not repeated for this display-filter change.

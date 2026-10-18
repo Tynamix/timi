@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, powerMonitor, screen, session, Tray } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, powerMonitor, screen, session, Tray } from 'electron';
 import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -6,7 +6,7 @@ import { SqliteStore } from './core/store';
 import { TrackingApplication } from './core/application';
 import { isCommand } from './validation';
 import { detectLocale, nativeMessages } from './native-messages';
-import type { AppError, Environment, Locale, Result, Snapshot, WindowKind } from './shared';
+import type { AppError, Environment, Locale, Result, Snapshot, WindowKind, WorkGoalNotice } from './shared';
 
 app.setName('timi');
 const dataArgument = process.argv.find(arg => arg.startsWith('--data-directory='));
@@ -31,6 +31,9 @@ let sleeping = false;
 let stickyError: AppError | null = null;
 let presentedPending: string | null = null;
 let reminderPresented = false;
+const goalNotifications = new Map<string, Notification>();
+const goalReceipts = new Map<string, WorkGoalNotice>();
+const goalRetryAt = new Map<string, number>();
 const windows = new Map<WindowKind, BrowserWindow>();
 const loaded = new Set<WindowKind>();
 const pageURL = pathToFileURL(join(__dirname, 'index.html')).href;
@@ -64,7 +67,7 @@ function sample(): void {
 function makeWindow(kind: WindowKind): BrowserWindow {
   const existing = windows.get(kind);
   if (existing && !existing.isDestroyed()) return existing;
-  const sizes: Record<WindowKind, [number, number]> = { entry: [440, 570], overview: [1120, 780], settings: [540, 610], clarification: [580, 570] };
+  const sizes: Record<WindowKind, [number, number]> = { entry: [440, 570], overview: [1120, 780], settings: [540, 790], clarification: [580, 570] };
   const [width, height] = sizes[kind];
   const win = new BrowserWindow({
     width, height, minWidth: kind === 'overview' ? 900 : width, minHeight: kind === 'overview' ? 640 : height,
@@ -156,6 +159,36 @@ function refresh(): void {
   tray?.setToolTip(`timi · ${msg().today}: ${time(state.todayMs)}\n${stickyError ? nativeErrorText(stickyError) : status}`);
   for (const win of windows.values()) if (!win.isDestroyed()) win.webContents.send('timi:changed');
   syncWindows(state);
+  syncGoalNotifications(state);
+}
+function syncGoalNotifications(state: Snapshot): void {
+  if (!tracking) return;
+  try {
+    for (const [key, notice] of goalReceipts) {
+      tracking.acknowledgeWorkGoalNotice(notice);
+      goalReceipts.delete(key);
+    }
+    if (stickyError || !state.canPresent || locked || sleeping || !Notification.isSupported()) return;
+    for (const notice of tracking.getWorkGoalNotices()) {
+      const key = `${notice.kind}:${notice.period}`;
+      if (goalNotifications.has(key) || goalReceipts.has(key) || (goalRetryAt.get(key) ?? 0) > state.now) continue;
+      const notification = new Notification({
+        title: notice.kind === 'day' ? msg().dailyGoalTitle : msg().weeklyGoalTitle,
+        body: (notice.kind === 'day' ? msg().dailyGoalBody : msg().weeklyGoalBody).replace('{time}', time(notice.targetMs)),
+      });
+      goalNotifications.set(key, notification);
+      notification.once('show', () => {
+        goalReceipts.set(key, notice);
+        try { tracking!.acknowledgeWorkGoalNotice(notice); goalReceipts.delete(key); }
+        catch (error) { report(error); }
+      });
+      notification.once('close', () => { goalNotifications.delete(key); });
+      notification.once('failed', () => { goalNotifications.delete(key); goalRetryAt.set(key, Date.now() + 60_000); });
+      notification.on('click', () => { foreground(makeWindow('overview'), 'overview'); });
+      try { notification.show(); }
+      catch { goalNotifications.delete(key); goalRetryAt.set(key, Date.now() + 60_000); }
+    }
+  } catch (error) { report(error); }
 }
 function attemptQuit(): void {
   if (quitting) return;

@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import test, { type TestContext } from 'node:test';
 import { TrackingApplication } from '../src/core/application.js';
 import { SqliteStore } from '../src/core/store.js';
+import { DEFAULT_SETTINGS } from '../src/core/model.js';
 
 const BASE = Date.UTC(2026, 9, 12, 10);
 
@@ -57,7 +58,7 @@ test('legacy migration preserves identities, records, settings, unresolved inter
   assert.equal(state.projects.find(project => project.id === 'alpha')!.name, 'Alpha Studio');
   assert.equal(state.records.find(record => record.id === 'saved-work')!.projectId, 'alpha');
   assert.equal(state.records.find(record => record.id === 'saved-break')!.kind, 'break');
-  assert.deepEqual(state.settings, { idleMinutes: 7, reminderMinutes: 10 });
+  assert.deepEqual(state.settings, { ...DEFAULT_SETTINGS, idleMinutes: 7 });
   assert.equal(state.pending!.id, 'pending-idle');
   assert.equal(state.pending!.end, BASE + 90_000);
   assert.equal(store.db.prepare('SELECT COUNT(*) AS count FROM periods').get()!.count, 1);

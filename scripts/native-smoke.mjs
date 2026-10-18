@@ -130,7 +130,10 @@ async function windowDiagnostics(application) {
 function localInput(milliseconds) {
   const date = new Date(milliseconds);
   const two = value => String(value).padStart(2, '0');
-  return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())}T${two(date.getHours())}:${two(date.getMinutes())}:${two(date.getSeconds())}.${String(date.getMilliseconds()).padStart(3, '0')}`;
+  // Chromium canonicalizes redundant seconds and trailing fractional zeros.
+  const fraction = String(date.getMilliseconds()).padStart(3, '0').replace(/0+$/, '');
+  const seconds = date.getSeconds() || fraction ? `:${two(date.getSeconds())}${fraction ? `.${fraction}` : ''}` : '';
+  return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())}T${two(date.getHours())}:${two(date.getMinutes())}${seconds}`;
 }
 
 try {
@@ -234,13 +237,22 @@ try {
   catch (error) { console.log(JSON.stringify(await windowDiagnostics(f.application), null, 2)); throw error; }
   await settings.locator('#idle-minutes').fill('2');
   await settings.locator('#reminder-minutes').fill('3');
+  for (const [index, hours] of ['7,6', '8', '8', '8', '8', '4', '0'].entries()) await settings.locator(`#work-hours-${index}`).fill(hours);
   await settings.getByRole('button', { name: 'Save preferences', exact: true }).click();
   await eventually(async () => (await state(settings)).settings.idleMinutes === 2, 'preferences save');
+  assert.deepEqual((await state(settings)).settings.workGoals.dailyHours, [7.6, 8, 8, 8, 8, 4, 0]);
+  await saveScreenshot(settings, 'settings-work-goals-en');
+  await settings.locator('.work-goals-section').screenshot({ path: join(artifacts, 'work-goals-en.png') });
+  const savedSettings = (await state(settings)).settings;
   await settings.locator('#idle-minutes').fill('0');
   await settings.getByRole('button', { name: 'Save preferences', exact: true }).click();
-  assert.deepEqual((await state(settings)).settings, { idleMinutes: 2, reminderMinutes: 3 });
+  assert.deepEqual((await state(settings)).settings, savedSettings);
   await settings.locator('#idle-minutes').fill('2');
-  record('Settings forms persist independent positive-minute preferences and reject invalid input; navigation closes entry');
+  await settings.locator('#work-hours-0').fill('25');
+  await settings.getByRole('button', { name: 'Save preferences', exact: true }).click();
+  assert.deepEqual((await state(settings)).settings, savedSettings);
+  await settings.locator('#work-hours-0').fill('7,6');
+  record('Settings persist weekday targets with decimal commas and reject invalid hours atomically; navigation closes entry');
 
   await entry.evaluate(() => window.timi.openWindow('overview'));
   const overview = await getWindow(f.application, 'overview');
@@ -342,6 +354,31 @@ try {
   await command(entry, { type: 'stop' });
   record('Active-use reminder foregrounds entry, Later resets its interval, Start break begins now without backfill');
 
+  // Exercise native notification wiring without posting test messages to the user's desktop.
+  await f.application.evaluate(({ Notification }) => {
+    globalThis.__timiSmokeGoalNotifications = [];
+    Notification.isSupported = () => true;
+    Notification.prototype.show = function () {
+      globalThis.__timiSmokeGoalNotifications.push({ title: this.title, body: this.body });
+      this.emit('show', {});
+      this.emit('close', {});
+    };
+  });
+  const dailyHours = [0, 0, 0, 0, 0, 0, 0];
+  const goalState = await state(entry);
+  dailyHours[(new Date(goalState.now).getDay() + 6) % 7] = 1 / 60;
+  await command(entry, { type: 'settings', idleMinutes: 5, reminderMinutes: 1, workGoals: { dailyHours, notifyDaily: true, notifyWeekly: true } });
+  await eventually(() => f.application.evaluate(() => globalThis.__timiSmokeGoalNotifications.length === 2), 'daily and weekly goal notifications');
+  const notices = await f.application.evaluate(() => globalThis.__timiSmokeGoalNotifications);
+  assert.deepEqual(notices.map(notice => notice.title), ['Daily working time reached', 'Weekly working time reached']);
+  assert.ok(notices.every(notice => notice.body.includes('0:01')));
+  await command(entry, { type: 'settings', idleMinutes: 5, reminderMinutes: 1 });
+  assert.equal(await f.application.evaluate(() => globalThis.__timiSmokeGoalNotifications.length), 2);
+  const noticeStorage = new DatabaseSync(join(f.directory, 'tracking.sqlite'));
+  try { assert.equal(noticeStorage.prepare('SELECT count(*) AS count FROM timi_goal_notices').get().count, 2); }
+  finally { noticeStorage.close(); }
+  record('Daily and weekly notifications use native Electron wiring and durable once-per-period receipts (display mocked)');
+
   assert.equal((await entry.evaluate(() => window.timi.command({ type: 'runShell', command: 'invalid' }))).ok, false);
   assert.equal(await entry.evaluate(async () => {
     try { await fetch('https://example.invalid/timi-security-check'); return false; } catch { return true; }
@@ -383,6 +420,13 @@ try {
     const localizedSettings = await getWindow(localized.application, 'settings');
     assert.equal(await localizedSettings.evaluate(() => document.documentElement.lang), expected);
     await saveScreenshot(localizedSettings, `settings-${language === 'de' ? 'de' : 'fallback-en'}`);
+    if (language === 'de') {
+      for (const [index, hours] of ['7,6', '8', '8', '8', '8', '4', '0'].entries()) await localizedSettings.locator(`#work-hours-${index}`).fill(hours);
+      await localizedSettings.emulateMedia({ colorScheme: 'light' });
+      await localizedSettings.locator('.work-goals-section').screenshot({ path: join(artifacts, 'work-goals-de.png') });
+      await localizedSettings.emulateMedia({ colorScheme: 'dark' });
+      await localizedSettings.locator('.work-goals-section').screenshot({ path: join(artifacts, 'work-goals-de-dark.png') });
+    }
     await closeApplication(localized.application);
   }
   record('macOS per-app AppleLanguages selects German and falls back to English for unsupported French');
@@ -393,6 +437,7 @@ try {
   await writeFile(join(artifacts, 'report.json'), JSON.stringify({
     passed: true, timestamp: new Date().toISOString(), native: { electron: native.version, platform: native.platform, architecture: native.architecture, packaged: environment.value.packaged, executable: process.env.TIMI_TEST_EXECUTABLE || electronPath }, checks,
     limitations: [
+      'Goal notification show/close events were mocked; real macOS presentation, permission prompts, and Focus behavior were not exercised.',
       'Lock and sleep were synthetic Electron powerMonitor events; physical lid, screen-lock, and wake hardware were not exercised.',
       'Native inactivity readings were replaced with controlled seconds for deterministic tests; actual keyboard/trackpad idle behavior requires a manual session.',
       'Launch-at-login registration was inspected without toggling the user’s login items; actual login reboot and signing/notarization were not tested.',
