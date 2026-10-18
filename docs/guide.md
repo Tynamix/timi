@@ -19,7 +19,7 @@ npm start
 
 Click the clock and today's total in the menu bar. Enter a project name, select an existing suggestion with the arrow keys and Enter, or click a suggestion. Names are trimmed and reused without regard to case. Escape or clicking outside closes entry; tracking continues. There is no permanent Dock icon.
 
-Pause records a projectless break. Play resumes the paused project at that instant. Starting any project ends a break. Stop ends recording and clears Play. The menu-bar context menu also provides Stop, weekly overview, settings, and Quit.
+Pause records a projectless break. Play resumes the paused project at that instant. Starting any project ends a break. Stop ends recording and clears Play. The menu-bar context menu also provides Stop, weekly overview, settings, and Quit. Weekly overview and settings share one resizable window. Use the labeled Settings button in the overview to open settings and the back button to return. Settings from the tracker or menu opens that view directly in the same window. Unsaved preferences and the selected week are preserved while switching views.
 
 After five minutes without native keyboard, mouse, or trackpad activity, the complete interval since the last activity is excluded from work. Returning opens one question: record as work on the previous project, record as a projectless break, or discard. The interval continues until the choice is made, then the previous project resumes. Locking or sleeping creates the same question immediately; it appears only after both waking and unlocking. Other applications remain usable while the question is open. Stop or Quit fixes the pending endpoint and prevents resumption.
 

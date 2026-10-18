@@ -8,7 +8,7 @@ import { isCommand } from './validation';
 import { detectLocale, nativeMessages } from './native-messages';
 import { statusTime } from './status-time';
 import { GoalReceiptQueue } from './goal-receipts';
-import type { AppError, Environment, Locale, Result, Snapshot, WindowKind } from './shared';
+import type { AppError, Environment, Locale, Result, Snapshot, WindowKind, WorkspaceView } from './shared';
 
 app.setName('timi');
 const dataArgument = process.argv.find(arg => arg.startsWith('--data-directory='));
@@ -38,6 +38,7 @@ const goalReceipts = new GoalReceiptQueue(notice => tracking!.acknowledgeWorkGoa
 const goalRetryAt = new Map<string, number>();
 const windows = new Map<WindowKind, BrowserWindow>();
 const loaded = new Set<WindowKind>();
+let workspaceView: WorkspaceView = 'overview';
 const pageURL = pathToFileURL(join(__dirname, 'index.html')).href;
 const msg = () => nativeMessages[locale];
 const nativeErrorText = (error: AppError) => error.code === 'CLOCK_INVALID' ? msg().clock : error.code === 'ACTIVITY_ERROR' ? msg().activity : msg().save;
@@ -69,7 +70,7 @@ function sample(): void {
 function makeWindow(kind: WindowKind): BrowserWindow {
   const existing = windows.get(kind);
   if (existing && !existing.isDestroyed()) return existing;
-  const sizes: Record<WindowKind, [number, number]> = { entry: [440, 570], overview: [1120, 780], settings: [540, 790], clarification: [580, 570] };
+  const sizes: Record<WindowKind, [number, number]> = { entry: [440, 570], overview: [1120, 780], clarification: [580, 570] };
   const [width, height] = sizes[kind];
   const win = new BrowserWindow({
     width, height, minWidth: kind === 'overview' ? 900 : width, minHeight: kind === 'overview' ? 640 : height,
@@ -90,6 +91,7 @@ function makeWindow(kind: WindowKind): BrowserWindow {
   });
   win.webContents.on('did-finish-load', () => {
     loaded.add(kind);
+    if (kind === 'overview') win.webContents.send('timi:navigate', workspaceView);
     if (stickyError) win.webContents.send('timi:error', stickyError);
     if (kind === 'clarification' && tracking) syncWindows(tracking.getSnapshot());
   });
@@ -115,6 +117,12 @@ function foreground(win: BrowserWindow, kind: WindowKind): void {
     win.webContents.send('timi:focus');
   };
   if (loaded.has(kind)) reveal(); else win.webContents.once('did-finish-load', reveal);
+}
+function showWorkspace(view: WorkspaceView): void {
+  workspaceView = view;
+  const win = makeWindow('overview');
+  if (loaded.has('overview')) win.webContents.send('timi:navigate', view);
+  foreground(win, 'overview');
 }
 function showEntry(): void {
   if (!tracking || !tray || locked || sleeping) return;
@@ -180,7 +188,7 @@ function syncGoalNotifications(state: Snapshot): void {
       notification.once('show', () => { goalReceipts.recordShown(notice); });
       notification.once('close', () => { goalNotifications.delete(key); });
       notification.once('failed', () => { goalNotifications.delete(key); goalRetryAt.set(key, Date.now() + 60_000); });
-      notification.on('click', () => { foreground(makeWindow('overview'), 'overview'); });
+      notification.on('click', () => { showWorkspace('overview'); });
       try { notification.show(); }
       catch { goalNotifications.delete(key); goalRetryAt.set(key, Date.now() + 60_000); }
     }
@@ -256,9 +264,9 @@ function installIPC(): void {
   });
   handle('timi:open', (_kind, kind) => {
     if (kind !== 'overview' && kind !== 'settings') throw { code: 'INVALID_COMMAND' };
-    const win = makeWindow(kind);
-    foreground(win, kind);
+    showWorkspace(kind);
   });
+  handle('timi:workspace-view', () => workspaceView);
   handle('timi:close', kind => { if (kind !== 'clarification') windows.get(kind)?.hide(); });
   handle('timi:quit', () => { attemptQuit(); });
 }
@@ -301,8 +309,8 @@ else {
         try { sample(); tracking!.execute({ type: 'stop' }); stickyError = null; reminderPresented = false; } catch (error) { report(error); }
         refresh();
       } }]),
-      { label: msg().overview, click: () => foreground(makeWindow('overview'), 'overview') },
-      { label: msg().settings, click: () => foreground(makeWindow('settings'), 'settings') },
+      { label: msg().overview, click: () => showWorkspace('overview') },
+      { label: msg().settings, click: () => showWorkspace('settings') },
       { type: 'separator' }, { label: msg().quit, click: nativeQuit },
     ])));
     Menu.setApplicationMenu(Menu.buildFromTemplate([

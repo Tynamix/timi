@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { DesktopAPI, AppError } from './shared';
+import type { DesktopAPI, AppError, WorkspaceView } from './shared';
 
 function listen<T>(channel: string, callback: (value: T) => void): () => void {
   const handler = (_event: Electron.IpcRendererEvent, value: T) => callback(value);
@@ -12,6 +12,8 @@ const api: DesktopAPI = {
   environment: () => ipcRenderer.invoke('timi:environment'),
   setLaunchAtLogin: enabled => ipcRenderer.invoke('timi:login', enabled),
   openWindow: kind => ipcRenderer.invoke('timi:open', kind),
+  workspaceView: () => ipcRenderer.invoke('timi:workspace-view'),
+  onNavigate: callback => listen<WorkspaceView>('timi:navigate', callback),
   closeWindow: () => ipcRenderer.invoke('timi:close'),
   quit: () => ipcRenderer.invoke('timi:quit'),
   onChanged: callback => listen('timi:changed', callback),
