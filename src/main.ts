@@ -7,7 +7,8 @@ import { TrackingApplication } from './core/application';
 import { isCommand } from './validation';
 import { detectLocale, nativeMessages } from './native-messages';
 import { statusTime } from './status-time';
-import type { AppError, Environment, Locale, Result, Snapshot, WindowKind, WorkGoalNotice } from './shared';
+import { GoalReceiptQueue } from './goal-receipts';
+import type { AppError, Environment, Locale, Result, Snapshot, WindowKind } from './shared';
 
 app.setName('timi');
 const dataArgument = process.argv.find(arg => arg.startsWith('--data-directory='));
@@ -33,7 +34,7 @@ let stickyError: AppError | null = null;
 let presentedPending: string | null = null;
 let reminderPresented = false;
 const goalNotifications = new Map<string, Notification>();
-const goalReceipts = new Map<string, WorkGoalNotice>();
+const goalReceipts = new GoalReceiptQueue(notice => tracking!.acknowledgeWorkGoalNotice(notice), report);
 const goalRetryAt = new Map<string, number>();
 const windows = new Map<WindowKind, BrowserWindow>();
 const loaded = new Set<WindowKind>();
@@ -166,24 +167,17 @@ function refresh(): void {
 function syncGoalNotifications(state: Snapshot): void {
   if (!tracking) return;
   try {
-    for (const [key, notice] of goalReceipts) {
-      tracking.acknowledgeWorkGoalNotice(notice);
-      goalReceipts.delete(key);
-    }
+    goalReceipts.flush();
     if (stickyError || !state.canPresent || locked || sleeping || !Notification.isSupported()) return;
     for (const notice of tracking.getWorkGoalNotices()) {
       const key = `${notice.kind}:${notice.period}`;
-      if (goalNotifications.has(key) || goalReceipts.has(key) || (goalRetryAt.get(key) ?? 0) > state.now) continue;
+      if (goalNotifications.has(key) || goalReceipts.has(notice) || (goalRetryAt.get(key) ?? 0) > state.now) continue;
       const notification = new Notification({
         title: notice.kind === 'day' ? msg().dailyGoalTitle : msg().weeklyGoalTitle,
         body: (notice.kind === 'day' ? msg().dailyGoalBody : msg().weeklyGoalBody).replace('{time}', time(notice.targetMs)),
       });
       goalNotifications.set(key, notification);
-      notification.once('show', () => {
-        goalReceipts.set(key, notice);
-        try { tracking!.acknowledgeWorkGoalNotice(notice); goalReceipts.delete(key); }
-        catch (error) { report(error); }
-      });
+      notification.once('show', () => { goalReceipts.recordShown(notice); });
       notification.once('close', () => { goalNotifications.delete(key); });
       notification.once('failed', () => { goalNotifications.delete(key); goalRetryAt.set(key, Date.now() + 60_000); });
       notification.on('click', () => { foreground(makeWindow('overview'), 'overview'); });
