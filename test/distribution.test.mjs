@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { cpSync, readFileSync, writeFileSync } from 'node:fs';
-import { mkdtemp, mkdir, readFile, readlink, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readlink, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
-import { createDmg, signingOptions } from '../scripts/distribution.mjs';
+import { createDmg, signingOptions, verifySigning } from '../scripts/distribution.mjs';
 
 const teamId = 'A123456789';
 const hash = 'a'.repeat(40);
@@ -46,6 +46,50 @@ test('release signing selects exactly one valid Developer ID identity from the e
   assert.deepEqual(options.optionsForFile('timi Helper (Renderer).app'), perFile);
   for (const output of ['', identity('B123456789'), identity() + identity(teamId, 'd'.repeat(40)), `${identity().trimEnd()} (CSSMERR_TP_CERT_EXPIRED)\n`]) {
     assert.throws(() => signingOptions(environment, () => output), /Expected one valid Developer ID Application identity/);
+  }
+});
+
+test('the signing preflight compiles, signs, verifies and runs a temporary executable using the release identity', async () => {
+  const calls = [];
+  let executable;
+  await verifySigning(environment, (command, args) => {
+    calls.push([command, ...args]);
+    if (command === 'security') return identity();
+    if (command === 'xcrun') {
+      executable = args.at(-1);
+      assert.equal(readFileSync(args[1], 'utf8'), 'int main(void) { return 0; }\n');
+    }
+    return '';
+  });
+  assert.deepEqual(calls.map(call => call.slice(0, 2)), [
+    ['security', 'find-identity'], ['xcrun', 'clang'], ['codesign', '--force'], ['codesign', '--verify'], [executable],
+  ]);
+  const signature = calls[2];
+  assert.equal(signature[signature.indexOf('--sign') + 1], hash);
+  assert.equal(signature[signature.indexOf('--keychain') + 1], environment.MACOS_SIGNING_KEYCHAIN);
+  assert.equal(signature[signature.indexOf('--options') + 1], 'runtime');
+  assert.ok(signature.includes('--timestamp'));
+  assert.match(signature[signature.indexOf('--entitlements') + 1], /assets\/entitlements\.plist$/);
+  await assert.rejects(stat(dirname(executable)), { code: 'ENOENT' });
+});
+
+test('the signing preflight propagates failures and always removes its source and executable', async t => {
+  for (const phase of ['compile', 'sign', 'verify', 'launch']) {
+    await t.test(phase, async () => {
+      let directory;
+      let launched = false;
+      const failure = new Error(`native ${phase} failed`);
+      await assert.rejects(verifySigning(environment, (command, args) => {
+        if (command === 'security') return identity();
+        if (command === 'xcrun') directory = dirname(args.at(-1));
+        const current = command === 'xcrun' ? 'compile' : command === 'codesign' ? args.includes('--verify') ? 'verify' : 'sign' : 'launch';
+        if (current === 'launch') launched = true;
+        if (current === phase) throw failure;
+        return '';
+      }), error => error === failure);
+      assert.equal(launched, phase === 'launch');
+      await assert.rejects(stat(directory), { code: 'ENOENT' });
+    });
   }
 });
 

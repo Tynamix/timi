@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { mkdir, rename, symlink } from 'node:fs/promises';
+import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 
 const command = (file, args, options = {}) => execFileSync(file, args, { stdio: 'inherit', ...options });
@@ -19,6 +20,25 @@ export function signingOptions(environment, run = command) {
     identity: identities[0][1], keychain, continueOnError: false,
     optionsForFile: () => ({ entitlements: resolve('assets/entitlements.plist'), hardenedRuntime: true }),
   };
+}
+
+export async function verifySigning(environment, run = command) {
+  const signing = signingOptions(environment, run);
+  const directory = await mkdtemp(join(tmpdir(), 'timi-signing-check-'));
+  try {
+    const source = join(directory, 'main.c');
+    const executable = join(directory, 'signing-check');
+    await writeFile(source, 'int main(void) { return 0; }\n');
+    run('xcrun', ['clang', source, '-o', executable]);
+    run('codesign', [
+      '--force', '--sign', signing.identity, '--keychain', signing.keychain, '--timestamp', '--options', 'runtime',
+      '--entitlements', signing.optionsForFile(executable).entitlements, executable,
+    ]);
+    run('codesign', ['--verify', '--strict', '--verbose=2', executable]);
+    run(executable, []);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 }
 
 function notarize(archive, target, signing, run) {

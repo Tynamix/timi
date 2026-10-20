@@ -52,7 +52,8 @@ jobs:
           node-version: '24.10.0'
           cache: npm
       - run: npm ci
-      - name: Prepare Developer ID signing and notarization
+      - name: Validate signing inputs
+        id: signing-inputs
         shell: bash
         env:
           MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
@@ -68,36 +69,44 @@ jobs:
           : "${APPLE_TEAM_ID:?Missing APPLE_TEAM_ID secret}"
           : "${APPLE_APP_SPECIFIC_PASSWORD:?Missing APPLE_APP_SPECIFIC_PASSWORD secret}"
           umask 077
-          keychain="$RUNNER_TEMP/timi-signing.keychain-db"
           certificate="$RUNNER_TEMP/timi-signing.p12"
-          intermediate="$RUNNER_TEMP/timi-developer-id-g2.cer"
           keychain_password="$(openssl rand -base64 32)"
           echo "::add-mask::$keychain_password"
+          echo "keychain-password=$keychain_password" >> "$GITHUB_OUTPUT"
           printf '%s' "$MACOS_CERTIFICATE_P12_BASE64" | base64 --decode > "$certificate"
-          security create-keychain -p "$keychain_password" "$keychain"
-          security set-keychain-settings -lut 7200 "$keychain"
-          security unlock-keychain -p "$keychain_password" "$keychain"
-          security import "$certificate" -P "$MACOS_CERTIFICATE_PASSWORD" -k "$keychain" -t cert -f pkcs12 -T /usr/bin/codesign -T /usr/bin/security
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -k "$keychain_password" "$keychain" > /dev/null
+      - name: Import Developer ID certificate
+        uses: apple-actions/import-codesign-certs@v6
+        with:
+          keychain: ${{ runner.temp }}/timi-signing
+          keychain-password: ${{ steps.signing-inputs.outputs.keychain-password }}
+          p12-filepath: ${{ runner.temp }}/timi-signing.p12
+          p12-password: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      - name: Verify signing and prepare notarization
+        shell: bash
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          MACOS_SIGNING_KEYCHAIN: ${{ runner.temp }}/timi-signing.keychain
+        run: |
+          set -euo pipefail
+          keychain="$MACOS_SIGNING_KEYCHAIN"
+          intermediate="$RUNNER_TEMP/timi-developer-id-g2.cer"
           curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
             https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer --output "$intermediate"
           security import "$intermediate" -k "$keychain"
+          node scripts/signing-check.mjs
           xcrun notarytool store-credentials timi-notarization --keychain "$keychain" \
             --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD"
-          rm -f "$certificate"
       - name: Version, package and publish GitHub release
         run: npm run release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          MACOS_SIGNING_KEYCHAIN: ${{ runner.temp }}/timi-signing.keychain-db
-      - name: Remove signing credentials
+          MACOS_SIGNING_KEYCHAIN: ${{ runner.temp }}/timi-signing.keychain
+      - name: Remove signing files
         if: always()
         shell: bash
         run: |
           set -euo pipefail
           rm -f "$RUNNER_TEMP/timi-signing.p12" "$RUNNER_TEMP/timi-developer-id-g2.cer"
-          keychain="$RUNNER_TEMP/timi-signing.keychain-db"
-          if [[ -f "$keychain" ]]; then
-            security delete-keychain "$keychain"
-          fi
