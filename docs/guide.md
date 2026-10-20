@@ -21,7 +21,7 @@ Click the clock and today's total in the menu bar. Enter a project name, select 
 
 Pause records a projectless break. Play resumes the paused project at that instant. Starting any project ends a break. Stop ends recording and clears Play. The menu-bar context menu also provides Stop, weekly overview, settings, and Quit. Weekly overview and settings share one resizable window. Use the labeled Settings button in the overview to open settings and the back button to return. Settings from the tracker or menu opens that view directly in the same window. Unsaved preferences and the selected week are preserved while switching views.
 
-After five minutes without native keyboard, mouse, or trackpad activity, the complete interval since the last activity is excluded from work. Returning opens one question: record as work on the previous project, record as a projectless break, or discard. The interval continues until the choice is made, then the previous project resumes. Locking or sleeping creates the same question immediately; it appears only after both waking and unlocking. Other applications remain usable while the question is open. Stop or Quit fixes the pending endpoint and prevents resumption.
+After five minutes without native keyboard, mouse, or trackpad activity, the complete interval since the last activity is excluded from work. Returning opens one question: record as work on the previous project, record as a projectless break, or discard. The interval continues until the choice is made, then the previous project resumes. Locking or sleeping creates the same question immediately; it appears only after both waking and unlocking. The question stays above other windows, including across Spaces and over full-screen apps, until answered. Other applications remain usable without the question repeatedly taking keyboard focus. Stop or Quit fixes the pending endpoint and prevents resumption.
 
 After ten minutes of active use without tracking, an entry reminder offers a project, Later, or Start break. Nothing is backfilled. Manual breaks suppress both kinds of reminder. Both thresholds can be configured independently in Settings using positive whole minutes.
 
@@ -36,6 +36,8 @@ Daily and weekly target notifications can be enabled separately. timi sends a na
 Open **Weekly overview** from entry or the menu-bar context menu. Browse this week and prior weeks. Only projects with working time in the selected week appear as rows, including archived projects with time in that week. Work is grouped by project and Monday–Sunday; breaks have separate totals. The indicator and reports share the same accounting functions. Records are split at current local calendar boundaries, including DST, using actual elapsed milliseconds. Displayed H:MM totals truncate only after summing milliseconds; there is no commercial rounding.
 
 The overview includes record inspection and an editor for missing work/breaks, boundaries, project assignment, splits, and deletion. A replacement or split commits atomically. Conflicts with saved records, current work/breaks, or unanswered periods are rejected and explained without altering other records. Finish current recording before editing that interval. Project management supports names, rename, archive, and restore. Archived projects retain their identity and history and disappear from normal project suggestions.
+
+Times are displayed and entered to the minute, without seconds or milliseconds. Editing a boundary sets it to the selected minute; unchanged boundaries retain their exact saved timestamps, including when changing projects or splitting a record. Internal tracking and totals still use actual elapsed milliseconds. During the autumn clock change, the editor lets you choose between repeated local times; nonexistent spring-forward times are rejected.
 
 English and German follow the macOS per-app preferred language, with English fallback. Set this in macOS System Settings, not inside timi. Optional launch at login is available in the packaged app and reflects the actual macOS registration. Every launch begins untracked, including login launches.
 
@@ -60,6 +62,22 @@ TIMI_TEST_EXECUTABLE="$PWD/release/timi-darwin-arm64/timi.app/Contents/MacOS/tim
 ```
 
 The core tests use controlled clocks, real isolated SQLite files, failures and retries, recovery, migration, midnight/week changes, and DST in Europe/Berlin and America/New_York. Native smoke tests run actual Electron windows with isolated data directories; lock/sleep signals and time advancement are injected. They require a macOS desktop session and do not run in CI. Physical sleep/lock/idle behavior, actual notification banners and launch at login need manual checks; universal binaries do not replace testing on Intel hardware and the minimum supported macOS. See [screenshot instructions](screenshots.md) for reproducible UI captures.
+
+### Debug in VS Code
+
+On macOS, install the dependencies with `npm ci`, then open this repository in VS Code. No additional debugger extension is required.
+
+1. Open **Run and Debug** and select **timi: Main + Renderer**.
+2. Set breakpoints in the TypeScript sources, for example [the main process](../src/main.ts) or [the renderer](../src/renderer/index.ts), then press **F5**. The build task runs automatically before Electron starts.
+3. Click the menu-bar clock to open the tracker. Renderer debugging attaches to a matching timi window.
+
+**timi: Main process** can also be launched alone. Source maps cover the main process, preload and renderer. After editing code, stop debugging and press **F5** again to rebuild; there is no watch mode or hot reload.
+
+To debug a specific renderer window, launch **timi: Main process** alone and open that window. Set the renderer's `urlFilter` in [launch.json](../.vscode/launch.json) to `*window=entry`, `*window=overview` (also Settings), or `*window=clarification`, then start **timi: Renderer** separately. Stopping either session in the combined configuration stops both.
+
+Debug launches store their SQLite database and Chromium profile in the ignored `.cache/vscode-debug/` directory, separate from your normal time records. This debug data persists between launches; startup still begins untracked. The renderer debugging endpoint uses loopback port `9222` only for this launch. If the port is already in use, change it in both configurations in [launch.json](../.vscode/launch.json). Sandboxing, context isolation and the app's runtime network restrictions remain enabled.
+
+Use **Quit timi** in the app for a normal, durable shutdown before ending the debug session. Forcibly stopping the debugger can exercise crash recovery on the isolated debug database.
 
 ## Pull requests and releases
 

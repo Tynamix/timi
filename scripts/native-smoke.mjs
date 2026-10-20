@@ -142,10 +142,7 @@ async function windowDiagnostics(application) {
 function localInput(milliseconds) {
   const date = new Date(milliseconds);
   const two = value => String(value).padStart(2, '0');
-  // Chromium canonicalizes redundant seconds and trailing fractional zeros.
-  const fraction = String(date.getMilliseconds()).padStart(3, '0').replace(/0+$/, '');
-  const seconds = date.getSeconds() || fraction ? `:${two(date.getSeconds())}${fraction ? `.${fraction}` : ''}` : '';
-  return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())}T${two(date.getHours())}:${two(date.getMinutes())}${seconds}`;
+  return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())}T${two(date.getHours())}:${two(date.getMinutes())}`;
 }
 
 try {
@@ -309,6 +306,33 @@ try {
   await entry.evaluate(() => window.timi.openWindow('overview'));
   const overview = await getWindow(f.application, 'overview');
   let current = await state(overview);
+  const precise = { start: current.now - 5 * 3_600_000 + 26_431, end: current.now - 4 * 3_600_000 + 48_765, kind: 'work', projectId: alpha };
+  current = await command(overview, { type: 'correct', removeIds: [], records: [precise] });
+  const preciseId = current.records.find(record => record.start === precise.start).id;
+  const correctionRows = () => overview.locator('.records-table tbody tr').filter({ hasText: 'Correction' });
+  await correctionRows().first().getByRole('button', { name: 'Edit', exact: true }).click();
+  const timeInputs = overview.locator('.editor input[type="datetime-local"]');
+  assert.deepEqual(await timeInputs.evaluateAll(inputs => inputs.map(input => ({ value: input.value, step: input.step, valid: input.validity.valid }))), [
+    { value: localInput(precise.start), step: '60', valid: true },
+    { value: localInput(precise.end), step: '60', valid: true },
+  ]);
+  assert.equal(await overview.locator('.segment-duration').textContent(), 'Duration: 1:00');
+  await overview.locator('.editor select[data-field="kind"]').selectOption('break');
+  await overview.getByRole('button', { name: 'Save changes', exact: true }).click();
+  await eventually(() => overview.locator('dialog[open]').count().then(count => count === 0), 'minute editor preserves precise boundaries');
+  let preciseSaved = (await state(overview)).records.find(record => record.start === precise.start);
+  assert.equal(preciseSaved.end, precise.end);
+  assert.equal(preciseSaved.kind, 'break');
+  await correctionRows().first().getByRole('button', { name: 'Edit', exact: true }).click();
+  const changedEnd = Math.floor(precise.end / 60_000) * 60_000 - 60_000;
+  await timeInputs.nth(1).fill(localInput(changedEnd));
+  await overview.getByRole('button', { name: 'Save changes', exact: true }).click();
+  await eventually(() => overview.locator('dialog[open]').count().then(count => count === 0), 'minute boundary correction saved');
+  preciseSaved = (await state(overview)).records.find(record => record.start === precise.start);
+  assert.equal(preciseSaved.end, changedEnd);
+  await command(overview, { type: 'correct', removeIds: [preciseSaved.id], records: [] });
+  assert.notEqual(preciseSaved.id, preciseId);
+  record('Minute-only correction inputs preserve precise untouched boundaries and save changed boundaries at whole minutes');
   await overview.getByRole('button', { name: 'Add time', exact: true }).click();
   await overview.locator('.editor input[type="datetime-local"]').nth(0).fill(localInput(current.now - 3 * 3_600_000));
   await overview.locator('.editor input[type="datetime-local"]').nth(1).fill(localInput(current.now - 2 * 3_600_000));
@@ -323,7 +347,6 @@ try {
   record('External settings navigation suspends and restores the correction editor without losing its draft');
   await overview.getByRole('button', { name: 'Save changes', exact: true }).click();
   await eventually(() => overview.locator('dialog[open]').count().then(count => count === 0), 'correction saved');
-  const correctionRows = () => overview.locator('.records-table tbody tr').filter({ hasText: 'Correction' });
   await correctionRows().first().getByRole('button', { name: 'Edit', exact: true }).click();
   await overview.getByRole('button', { name: 'Split', exact: true }).click();
   await overview.locator('.editor select[data-field="kind"]').nth(1).selectOption('break');
@@ -359,6 +382,16 @@ try {
   const clarification = await getWindow(f.application, 'clarification');
   await eventually(() => visible(f.application, 'clarification'), 'clarification shown after awake and unlocked');
   assert.equal((await state(entry)).pending.id, pendingId);
+  assert.deepEqual(await f.application.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows().filter(window => /window=(entry|overview|clarification)$/.test(window.webContents.getURL()))
+      .map(window => ({
+        kind: new URL(window.webContents.getURL()).searchParams.get('window'),
+        onTop: window.isAlwaysOnTop(), allWorkspaces: window.isVisibleOnAllWorkspaces(),
+      })).sort((left, right) => left.kind.localeCompare(right.kind))), [
+    { kind: 'clarification', onTop: true, allWorkspaces: true },
+    { kind: 'entry', onTop: false, allWorkspaces: false },
+    { kind: 'overview', onTop: false, allWorkspaces: false },
+  ]);
   assert.equal(await clarification.locator('.clarification-choices button').count(), 3);
   await clarification.keyboard.press('Escape');
   await f.application.evaluate(({ BrowserWindow }) => {
@@ -370,12 +403,30 @@ try {
   await settings.locator('.settings-page').waitFor({ state: 'visible' });
   await pause(2_200);
   assert.equal(await f.application.evaluate(({ BrowserWindow }) => BrowserWindow.getFocusedWindow()?.webContents.getURL().endsWith('window=overview')), true);
+  assert.deepEqual(await f.application.evaluate(({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows().find(window => window.webContents.getURL().endsWith('window=clarification'));
+    return { visible: window.isVisible(), focused: window.isFocused(), onTop: window.isAlwaysOnTop(), allWorkspaces: window.isVisibleOnAllWorkspaces() };
+  }), { visible: true, focused: false, onTop: true, allWorkspaces: true });
+  await signal(f, 'lock-screen');
+  await signal(f, 'suspend');
+  assert.equal(await visible(f.application, 'clarification'), false);
+  await signal(f, 'unlock-screen');
+  assert.equal(await visible(f.application, 'clarification'), false);
+  await signal(f, 'resume');
+  await eventually(() => visible(f.application, 'clarification'), 'same clarification restored after lock and sleep');
+  assert.equal((await state(entry)).pending.id, pendingId);
+  assert.deepEqual(await f.application.evaluate(({ BrowserWindow, app }) => {
+    const window = BrowserWindow.getAllWindows().find(window => window.webContents.getURL().endsWith('window=clarification'));
+    return { focused: window.isFocused(), onTop: window.isAlwaysOnTop(), allWorkspaces: window.isVisibleOnAllWorkspaces(), dockVisible: app.dock.isVisible() };
+  }), { focused: false, onTop: true, allWorkspaces: true, dockVisible: false });
+  record('Clarification alone stays always-on-top across workspaces after blur and lock/sleep without stealing focus or showing the Dock');
   await clock(f, 5 * 60_000, 5 * 60);
   await command(entry, { type: 'settings', idleMinutes: 2, reminderMinutes: 3 });
   assert.equal((await state(entry)).canPresent, true);
   await saveScreenshot(clarification, 'clarification-en');
   await clarification.getByRole('button', { name: /^Record as a break/ }).click();
   await eventually(async () => (await state(entry)).pending === null, 'clarification resolved');
+  await eventually(async () => !(await visible(f.application, 'clarification')), 'resolved clarification hides');
   current = await state(entry);
   assert.equal(current.mode, 'work');
   const idleRecord = current.records.find(record => record.source === 'idle');

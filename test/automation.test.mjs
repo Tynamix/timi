@@ -10,6 +10,28 @@ import releaseConfig from '../release.config.mjs';
 
 const logger = { log() {} };
 
+test('VS Code debugging builds first, isolates data and connects the renderer over loopback', async () => {
+  const launch = JSON.parse(await readFile(new URL('../.vscode/launch.json', import.meta.url), 'utf8'));
+  const tasks = JSON.parse(await readFile(new URL('../.vscode/tasks.json', import.meta.url), 'utf8'));
+  const main = launch.configurations.find(config => config.type === 'node' && config.request === 'launch');
+  const renderer = launch.configurations.find(config => config.type === 'chrome' && config.request === 'attach');
+  const build = tasks.tasks.find(task => task.label === main.preLaunchTask);
+  assert.equal(build.type, 'npm');
+  assert.equal(build.script, 'build');
+  assert.equal(main.runtimeExecutable, '${workspaceFolder}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron');
+  assert.equal(main.cwd, '${workspaceFolder}');
+  assert.equal(main.env.ELECTRON_RUN_AS_NODE, null);
+  assert.deepEqual(main.args, ['.', '--data-directory=${workspaceFolder}/.cache/vscode-debug']);
+  assert.ok(main.outFiles.includes('${workspaceFolder}/dist/**/*.cjs'));
+  assert.ok(main.runtimeArgs.includes(`--remote-debugging-port=${renderer.port}`));
+  assert.ok(main.runtimeArgs.includes(`--remote-debugging-address=${renderer.address}`));
+  assert.equal(renderer.address, '127.0.0.1');
+  assert.equal(renderer.webRoot, '${workspaceFolder}');
+  assert.equal(renderer.urlFilter, 'file://${workspaceFolder}/dist/index.html*');
+  assert.ok(renderer.timeout >= 30_000);
+  assert.ok(launch.compounds.some(compound => compound.stopAll && compound.configurations.includes(main.name) && compound.configurations.includes(renderer.name)));
+});
+
 test('releases require signing and publish only the universal DMG and its final checksum', () => {
   const [, exec] = releaseConfig.plugins.find(plugin => plugin[0] === '@semantic-release/exec');
   const [, github] = releaseConfig.plugins.find(plugin => plugin[0] === '@semantic-release/github');
