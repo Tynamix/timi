@@ -1,0 +1,43 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "timi: Main process",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "${workspaceFolder}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
+      "runtimeArgs": [
+        "--remote-debugging-address=127.0.0.1",
+        "--remote-debugging-port=9222"
+      ],
+      "args": [
+        ".",
+        "--data-directory=${workspaceFolder}/.cache/vscode-debug"
+      ],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "ELECTRON_RUN_AS_NODE": null
+      },
+      "preLaunchTask": "timi: Build",
+      "outFiles": ["${workspaceFolder}/dist/**/*.cjs"],
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "name": "timi: Renderer",
+      "type": "chrome",
+      "request": "attach",
+      "address": "127.0.0.1",
+      "port": 9222,
+      "timeout": 30000,
+      "webRoot": "${workspaceFolder}",
+      "urlFilter": "file://${workspaceFolder}/dist/index.html*"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "timi: Main + Renderer",
+      "configurations": ["timi: Main process", "timi: Renderer"],
+      "stopAll": true
+    }
+  ]
+}
