@@ -14,7 +14,7 @@ A private menu-bar time tracker for macOS. Set your working hours, see what's le
 [![Apple Silicon & Intel](https://img.shields.io/badge/Apple_Silicon_%26_Intel-universal-214f45?style=flat-square)](https://github.com/Tynamix/timi/releases/latest)
 [![MIT license](https://img.shields.io/badge/license-MIT-214f45?style=flat-square)](LICENSE)
 
-**[Download for macOS](https://github.com/Tynamix/timi/releases/latest/download/timi-mac-universal.zip)** · [Why timi?](#why-timi) · [Working time targets](#a-working-week-that-fits-you) · [Get started](#get-started) · [Contribute](#contribute)
+**[Download for macOS](https://github.com/Tynamix/timi/releases/latest/download/timi-mac-universal.dmg)** · [Why timi?](#why-timi) · [Working time targets](#a-working-week-that-fits-you) · [Get started](#get-started) · [Contribute](#contribute)
 
 </div>
 
@@ -94,11 +94,11 @@ Adjust start and end times, change project assignments, split a period, or delet
 
 ## Get started
 
-1. **[Download timi for macOS](https://github.com/Tynamix/timi/releases/latest/download/timi-mac-universal.zip)** — one universal app for Apple Silicon and Intel, macOS 13 or later.
-2. Unzip and drag **timi.app** into **Applications**.
-3. Open timi, click its menu-bar clock, type a project name, and press **Enter**.
+1. **[Download timi for macOS](https://github.com/Tynamix/timi/releases/latest/download/timi-mac-universal.dmg)** — one universal app for Apple Silicon and Intel, macOS 13 or later.
+2. Open the DMG and drag **timi** onto **Applications** inside the disk-image window.
+3. Eject the disk image, open timi from Applications, click its menu-bar clock, type a project name, and press **Enter**.
 
-The current download is ad-hoc signed and **not notarized by Apple**. If macOS blocks the first launch, use **System Settings → Privacy & Security → Open Anyway**. Releases include `SHA256SUMS` for archive verification; see the [installation guide](docs/guide.md#install-and-run).
+Official releases are Developer ID signed and notarized by Apple. Notarization tickets are attached to the app and DMG for offline verification. macOS may still ask you to confirm opening an app downloaded from the internet. Releases include `SHA256SUMS` for download verification; see the [installation guide](docs/guide.md#install-and-run).
 
 ### A few things that make the day easier
 
@@ -156,7 +156,7 @@ Built with **Electron · TypeScript · plain HTML/CSS · SQLite**.
 ```sh
 npm run check              # Type checking, core tests, and build
 npm run test:native        # Real Electron integration checks on a Mac desktop
-npm run package:universal  # Package for Apple Silicon and Intel
+npm run package:universal  # Local development DMG for Apple Silicon and Intel
 ```
 
 See the [build guide](docs/guide.md#build-and-verify) for host-architecture builds and packaged-app checks, and [verification notes](docs/verification.md) for test coverage and native testing limits.
