@@ -359,6 +359,16 @@ try {
   const clarification = await getWindow(f.application, 'clarification');
   await eventually(() => visible(f.application, 'clarification'), 'clarification shown after awake and unlocked');
   assert.equal((await state(entry)).pending.id, pendingId);
+  assert.deepEqual(await f.application.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows().filter(window => /window=(entry|overview|clarification)$/.test(window.webContents.getURL()))
+      .map(window => ({
+        kind: new URL(window.webContents.getURL()).searchParams.get('window'),
+        onTop: window.isAlwaysOnTop(), allWorkspaces: window.isVisibleOnAllWorkspaces(),
+      })).sort((left, right) => left.kind.localeCompare(right.kind))), [
+    { kind: 'clarification', onTop: true, allWorkspaces: true },
+    { kind: 'entry', onTop: false, allWorkspaces: false },
+    { kind: 'overview', onTop: false, allWorkspaces: false },
+  ]);
   assert.equal(await clarification.locator('.clarification-choices button').count(), 3);
   await clarification.keyboard.press('Escape');
   await f.application.evaluate(({ BrowserWindow }) => {
@@ -370,12 +380,30 @@ try {
   await settings.locator('.settings-page').waitFor({ state: 'visible' });
   await pause(2_200);
   assert.equal(await f.application.evaluate(({ BrowserWindow }) => BrowserWindow.getFocusedWindow()?.webContents.getURL().endsWith('window=overview')), true);
+  assert.deepEqual(await f.application.evaluate(({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows().find(window => window.webContents.getURL().endsWith('window=clarification'));
+    return { visible: window.isVisible(), focused: window.isFocused(), onTop: window.isAlwaysOnTop(), allWorkspaces: window.isVisibleOnAllWorkspaces() };
+  }), { visible: true, focused: false, onTop: true, allWorkspaces: true });
+  await signal(f, 'lock-screen');
+  await signal(f, 'suspend');
+  assert.equal(await visible(f.application, 'clarification'), false);
+  await signal(f, 'unlock-screen');
+  assert.equal(await visible(f.application, 'clarification'), false);
+  await signal(f, 'resume');
+  await eventually(() => visible(f.application, 'clarification'), 'same clarification restored after lock and sleep');
+  assert.equal((await state(entry)).pending.id, pendingId);
+  assert.deepEqual(await f.application.evaluate(({ BrowserWindow, app }) => {
+    const window = BrowserWindow.getAllWindows().find(window => window.webContents.getURL().endsWith('window=clarification'));
+    return { focused: window.isFocused(), onTop: window.isAlwaysOnTop(), allWorkspaces: window.isVisibleOnAllWorkspaces(), dockVisible: app.dock.isVisible() };
+  }), { focused: false, onTop: true, allWorkspaces: true, dockVisible: false });
+  record('Clarification alone stays always-on-top across workspaces after blur and lock/sleep without stealing focus or showing the Dock');
   await clock(f, 5 * 60_000, 5 * 60);
   await command(entry, { type: 'settings', idleMinutes: 2, reminderMinutes: 3 });
   assert.equal((await state(entry)).canPresent, true);
   await saveScreenshot(clarification, 'clarification-en');
   await clarification.getByRole('button', { name: /^Record as a break/ }).click();
   await eventually(async () => (await state(entry)).pending === null, 'clarification resolved');
+  await eventually(async () => !(await visible(f.application, 'clarification')), 'resolved clarification hides');
   current = await state(entry);
   assert.equal(current.mode, 'work');
   const idleRecord = current.records.find(record => record.source === 'idle');

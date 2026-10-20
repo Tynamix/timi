@@ -79,6 +79,10 @@ function makeWindow(kind: WindowKind): BrowserWindow {
     skipTaskbar: true, title: 'timi', backgroundColor: '#f5f4ef',
     webPreferences: { preload: join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, spellcheck: false, webSecurity: true, allowRunningInsecureContent: false },
   });
+  if (kind === 'clarification') {
+    win.setAlwaysOnTop(true, 'floating');
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+  }
   windows.set(kind, win);
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', event => event.preventDefault());

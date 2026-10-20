@@ -26,7 +26,7 @@ timi helps you keep track through the interruptions of a real working day. When 
 
 ## Why timi?
 
-**Step away. Come back. Decide.** During project tracking, timi notices inactivity, screen locking, and sleep. When you return, one question lets you record the time as work on your previous project, record it as a break, or discard it. For inactivity, this covers the entire interval since your last activity. The interval continues until you decide, then your previous project resumes unless you stopped tracking. Time away stays out of your working total until you've classified it.
+**Step away. Come back. Decide.** During project tracking, timi notices inactivity, screen locking, and sleep. When you return, one question lets you record the time as work on your previous project, record it as a break, or discard it. The question stays above other windows, even when you click elsewhere, until you answer. For inactivity, this covers the entire interval since your last activity. The interval continues until you decide, then your previous project resumes unless you stopped tracking. Time away stays out of your working total until you've classified it.
 
 **A reminder when you forget to start.** It's easy to get straight into work and forget the timer. After 10 minutes of active use without tracking, timi offers to start a project, remind you later, or begin a break. Tracking starts from your choice; missing time can be added separately. You can adjust the reminder and inactivity thresholds independently, and manual breaks suppress both reminders.
 
