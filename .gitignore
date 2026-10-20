@@ -9,5 +9,6 @@ artifacts/
 *.sqlite-wal
 .DS_Store
 *.p12
+*.keychain
 *.keychain-db
 *.keychain-db-*

@@ -20,20 +20,30 @@ test('releases require signing and publish only the universal DMG and its final 
   assert.doesNotMatch(github.releaseBodyTemplate, /\.zip|Open Anyway|ad-hoc/);
 });
 
-test('CI signing validates every secret before creating files and always removes its temporary keychain', async t => {
+test('CI signing validates every secret, delegates keychain setup to the import action and cleans up certificate files', async t => {
   const workflow = await readFile(new URL('../.github/workflows/verify-and-release.yml', import.meta.url), 'utf8');
   const scripts = [...workflow.matchAll(/        run: \|\n((?:          .*(?:\n|$))+)/g)]
     .map(match => match[1].replace(/^          /gm, ''));
-  assert.equal(scripts.length, 2);
+  assert.equal(scripts.length, 3);
   for (const script of scripts) {
     const result = spawnSync('bash', ['-n'], { input: script, encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
   }
-  assert.match(workflow, /name: Remove signing credentials\n\s+if: always\(\)/);
-  assert.match(scripts[0], /--keychain "\$keychain"/);
-  assert.match(scripts[0], /notarytool store-credentials timi-notarization/);
-  assert.doesNotMatch(scripts[0], /list-keychains|default-keychain|add-trusted-cert/);
-  assert.match(scripts[1], /security delete-keychain "\$keychain"/);
+  assert.match(workflow, /name: Remove signing files\n\s+if: always\(\)/);
+  assert.match(workflow, /uses: apple-actions\/import-codesign-certs@v6/);
+  assert.match(workflow, /keychain: \$\{\{ runner\.temp \}\}\/timi-signing\n/);
+  assert.match(workflow, /keychain-password: \$\{\{ steps\.signing-inputs\.outputs\.keychain-password \}\}/);
+  assert.match(workflow, /p12-filepath: \$\{\{ runner\.temp \}\}\/timi-signing\.p12/);
+  assert.equal([...workflow.matchAll(/MACOS_SIGNING_KEYCHAIN: \$\{\{ runner\.temp \}\}\/timi-signing\.keychain\n/g)].length, 2);
+  assert.match(scripts[0], /openssl rand -base64 32/);
+  assert.match(scripts[0], /::add-mask::\$keychain_password/);
+  assert.doesNotMatch(scripts.join('\n'), /create-keychain|unlock-keychain|set-key-partition-list|default-keychain|add-trusted-cert|delete-keychain/);
+  assert.match(scripts[1], /--keychain "\$keychain"/);
+  assert.ok(scripts[1].indexOf('node scripts/signing-check.mjs') < scripts[1].indexOf('notarytool store-credentials'));
+  assert.match(scripts[1], /node scripts\/signing-check\.mjs/);
+  assert.match(scripts[2], /rm -f "\$RUNNER_TEMP\/timi-signing\.p12" "\$RUNNER_TEMP\/timi-developer-id-g2\.cer"/);
+  assert.ok(workflow.indexOf('uses: apple-actions/import-codesign-certs@v6') < workflow.indexOf('node scripts/signing-check.mjs'));
+  assert.ok(workflow.indexOf('node scripts/signing-check.mjs') < workflow.indexOf('run: npm run release'));
   const directory = await mkdtemp(join(tmpdir(), 'timi-ci-signing-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const secrets = {
