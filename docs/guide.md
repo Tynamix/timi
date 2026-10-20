@@ -51,7 +51,7 @@ open release/timi-darwin-arm64/timi.app
 
 `npm run package` builds for the host Mac architecture, with a DMG at `release/timi-mac-arm64.dmg` or `release/timi-mac-x64.dmg`. The Intel app output directory is `release/timi-darwin-x64`. `npm run package:universal` builds a single application for Apple Silicon and Intel (and downloads both Electron runtimes), at `release/timi-darwin-universal/timi.app` with `release/timi-mac-universal.dmg`. Each DMG contains the app and an Applications shortcut.
 
-Local packaging defaults to ad-hoc signing, verifies the signature and disk image, and does not contact Apple's notary service or require credentials. These are development builds, not trusted downloads for other Macs; macOS may require **Open Anyway** for an externally downloaded local build. Public releases explicitly use `npm run package:universal -- --signed`, with Developer ID signing, Hardened Runtime, notarization, stapling, and Gatekeeper checks. Missing credentials or failed checks abort packaging rather than falling back to an ad-hoc release. See [signing setup](automation.md#developer-id-signing-and-notarization).
+Local packaging defaults to ad-hoc signing, verifies the signature and disk image, and does not contact Apple's notary service or require credentials. These are development builds, not trusted downloads for other Macs; macOS may require **Open Anyway** for an externally downloaded local build. Public releases explicitly use `npm run package:universal -- --signed`, with Developer ID signing, Hardened Runtime, notarization, stapling, and Gatekeeper checks. Missing credentials or failed checks abort packaging rather than falling back to an ad-hoc release. See [release signing](#release-signing).
 
 To run native smoke tests against a packaged app:
 
@@ -59,13 +59,33 @@ To run native smoke tests against a packaged app:
 TIMI_TEST_EXECUTABLE="$PWD/release/timi-darwin-arm64/timi.app/Contents/MacOS/timi" npm run test:native
 ```
 
-The core tests use controlled clocks, real isolated SQLite files, failures and retries, recovery, migration, midnight/week changes, and DST in Europe/Berlin and America/New_York. Native smoke tests run actual Electron windows with isolated data directories; lock/sleep signals and time advancement are injected. Screenshots and the recorded native-check limits are described in [verification](verification.md).
+The core tests use controlled clocks, real isolated SQLite files, failures and retries, recovery, migration, midnight/week changes, and DST in Europe/Berlin and America/New_York. Native smoke tests run actual Electron windows with isolated data directories; lock/sleep signals and time advancement are injected. They require a macOS desktop session and do not run in CI. Physical sleep/lock/idle behavior, actual notification banners and launch at login need manual checks; universal binaries do not replace testing on Intel hardware and the minimum supported macOS. See [screenshot instructions](screenshots.md) for reproducible UI captures.
 
 ## Pull requests and releases
 
-Every pull request targeting `main` runs type checking, unit tests and the build on Linux and macOS. AI reviews use the native Codex GitHub integration, enabled in Codex repository settings. Review guidance lives in [AGENTS.md](../AGENTS.md); no AI credentials are needed in GitHub Actions. See [automation setup](automation.md) for review configuration and repository settings.
+Every pull request targeting `main` and push to `main` runs type checking, unit tests and the build on Linux and macOS. Protect `main` with required pull requests and the checks `Verify (ubuntu-24.04)`, `Verify (macos-14)` and `Conventional PR title`. AI reviews use the native Codex GitHub integration, configured in Codex repository settings. Review guidance lives in [AGENTS.md](../AGENTS.md); no AI credentials are needed in GitHub Actions.
 
-Use Conventional Commit PR titles and squash-merge with that title: `fix: …` creates a patch release, `feat: …` a minor release, and `feat!: …` or a `BREAKING CHANGE:` footer a major release. Documentation, CI and other maintenance-only changes do not create a release. After merges to `main`, successful Linux and macOS checks allow semantic-release to publish a version tag, release notes, a signed and notarized universal macOS DMG and its checksum. Version metadata is set before packaging; versions are not committed back to `main`. See [automation setup](automation.md) for the recommended branch rules and first-release behavior.
+Use Conventional Commit PR titles and squash-merge with that title: `fix: …` creates a patch release, `feat: …` a minor release, and `feat!: …` or a `BREAKING CHANGE:` footer a major release. Documentation, CI and other maintenance-only changes do not create a release unless breaking. After merges to `main`, successful Linux and macOS checks allow semantic-release to publish a version tag, release notes, a signed and notarized universal macOS DMG and its checksum. Versions are calculated from reachable `vX.Y.Z` tags; without a previous release tag the first release is `1.0.0`. Version metadata is set before packaging, not committed back to `main`. The automatic `GITHUB_TOKEN` needs `contents: write`; no npm publishing token is needed.
+
+### Release signing
+
+An active paid Apple Developer Program membership and a **Developer ID Application** certificate are required. Export the certificate together with its private key as a password-protected `.p12` and add these repository secrets under **Settings → Secrets and variables → Actions**:
+
+| Secret | Value |
+| --- | --- |
+| `MACOS_CERTIFICATE_P12_BASE64` | Base64-encoded `.p12`, including the private key |
+| `MACOS_CERTIFICATE_PASSWORD` | The `.p12` export password |
+| `APPLE_ID` | Apple Account email for notarization |
+| `APPLE_TEAM_ID` | The certificate's ten-character Developer Team ID |
+| `APPLE_APP_SPECIFIC_PASSWORD` | An app-specific Apple password, not the normal account password |
+
+Base64 is not encryption. Never commit certificates containing private keys or passwords. The workflow imports the certificate into a temporary keychain using `apple-actions/import-codesign-certs`, checks actual signing, then signs and notarizes both the app and DMG. Tickets are stapled for offline verification; publication requires Apple's `Accepted` status and successful signature/Gatekeeper checks. Temporary credentials are cleaned up after the job.
+
+Each Apple submission can wait up to 60 minutes; the release-job limit is 150 minutes. Phase messages, submission IDs and native progress appear in the job log. Apple may continue processing after a timeout; query the existing submission before retrying. A later acceptance does not automatically finish an aborted release or cover a differently rebuilt app.
+
+Local signed builds require `APPLE_TEAM_ID`, `MACOS_SIGNING_KEYCHAIN`, and a `timi-notarization` profile stored in that keychain with `xcrun notarytool store-credentials`. Use its interactive password prompt. `node scripts/signing-check.mjs` checks signing without uploading an app; `npm run package:universal -- --signed` builds the trusted DMG.
+
+Before distributing a release, browser-download the DMG, verify its checksum, drag timi to Applications, eject the image and test launch, including offline. Do not bypass Gatekeeper or remove quarantine attributes for this check. Test results belong in CI logs and pull requests, not a running verification diary.
 
 ## Data and recovery
 

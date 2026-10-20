@@ -25,6 +25,7 @@ test('CI signing validates every secret, delegates keychain setup to the import 
   const scripts = [...workflow.matchAll(/        run: \|\n((?:          .*(?:\n|$))+)/g)]
     .map(match => match[1].replace(/^          /gm, ''));
   assert.equal(scripts.length, 3);
+  assert.match(workflow, /  release:\n[\s\S]*?timeout-minutes: 150\n/);
   for (const script of scripts) {
     const result = spawnSync('bash', ['-n'], { input: script, encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
