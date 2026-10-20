@@ -8,3 +8,6 @@ artifacts/
 *.sqlite-shm
 *.sqlite-wal
 .DS_Store
+*.p12
+*.keychain-db
+*.keychain-db-*

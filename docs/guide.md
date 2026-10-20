@@ -6,9 +6,9 @@ A local, offline menu-bar time tracker for macOS 13 or later. Electron, TypeScri
 
 ## Install and run
 
-Download [timi for macOS (Apple Silicon + Intel)](https://github.com/Tynamix/timi/releases/latest/download/timi-mac-universal.zip) from [GitHub Releases](https://github.com/Tynamix/timi/releases/latest), unzip it, and drag **timi.app** into Applications. Requires macOS 13 or later.
+Download [timi for macOS (Apple Silicon + Intel)](https://github.com/Tynamix/timi/releases/latest/download/timi-mac-universal.dmg) from [GitHub Releases](https://github.com/Tynamix/timi/releases/latest), open the DMG, and drag **timi** onto the **Applications** shortcut. Eject the disk image and launch timi from Applications. Requires macOS 13 or later.
 
-The download is ad-hoc signed, without Apple notarization. If macOS blocks the first launch, use **System Settings → Privacy & Security → Open Anyway**. Each release includes `SHA256SUMS`; download it beside the ZIP and run `shasum -a 256 -c SHA256SUMS` to verify the archive.
+Official releases are Developer ID signed and notarized by Apple. Both the app and DMG have attached notarization tickets for offline verification. macOS may still ask you to confirm the first launch of an internet download; this is different from an unidentified-developer warning. Each release includes `SHA256SUMS`; download it beside the DMG and run `shasum -a 256 -c SHA256SUMS` to verify the download.
 
 To run from source, use Node.js 22.14 or later and macOS with Xcode Command Line Tools. CI uses Node.js 24.10. Development and packaging download dependencies; the installed application works offline.
 
@@ -49,7 +49,9 @@ npm run package
 open release/timi-darwin-arm64/timi.app
 ```
 
-`npm run package` builds for the host Mac architecture. The Intel output directory is `release/timi-darwin-x64`. `npm run package:universal` builds a single application for Apple Silicon and Intel (and downloads both Electron runtimes), at `release/timi-darwin-universal/timi.app` with `release/timi-mac-universal.zip`. Packaging verifies the ad-hoc signature and creates a ZIP beside the app. Drag `timi.app` into Applications to install. Distributing it to other Macs requires your own Apple Developer signing and notarization. macOS may require **Open Anyway** for an externally downloaded local build.
+`npm run package` builds for the host Mac architecture, with a DMG at `release/timi-mac-arm64.dmg` or `release/timi-mac-x64.dmg`. The Intel app output directory is `release/timi-darwin-x64`. `npm run package:universal` builds a single application for Apple Silicon and Intel (and downloads both Electron runtimes), at `release/timi-darwin-universal/timi.app` with `release/timi-mac-universal.dmg`. Each DMG contains the app and an Applications shortcut.
+
+Local packaging defaults to ad-hoc signing, verifies the signature and disk image, and does not contact Apple's notary service or require credentials. These are development builds, not trusted downloads for other Macs; macOS may require **Open Anyway** for an externally downloaded local build. Public releases explicitly use `npm run package:universal -- --signed`, with Developer ID signing, Hardened Runtime, notarization, stapling, and Gatekeeper checks. Missing credentials or failed checks abort packaging rather than falling back to an ad-hoc release. See [signing setup](automation.md#developer-id-signing-and-notarization).
 
 To run native smoke tests against a packaged app:
 
@@ -63,7 +65,7 @@ The core tests use controlled clocks, real isolated SQLite files, failures and r
 
 Every pull request targeting `main` runs type checking, unit tests and the build on Linux and macOS. AI reviews use the native Codex GitHub integration, enabled in Codex repository settings. Review guidance lives in [AGENTS.md](../AGENTS.md); no AI credentials are needed in GitHub Actions. See [automation setup](automation.md) for review configuration and repository settings.
 
-Use Conventional Commit PR titles and squash-merge with that title: `fix: …` creates a patch release, `feat: …` a minor release, and `feat!: …` or a `BREAKING CHANGE:` footer a major release. Documentation, CI and other maintenance-only changes do not create a release. After merges to `main`, successful Linux and macOS checks allow semantic-release to publish a version tag, release notes, a universal macOS ZIP and its checksum. Version metadata is set before packaging; versions are not committed back to `main`. See [automation setup](automation.md) for the recommended branch rules and first-release behavior.
+Use Conventional Commit PR titles and squash-merge with that title: `fix: …` creates a patch release, `feat: …` a minor release, and `feat!: …` or a `BREAKING CHANGE:` footer a major release. Documentation, CI and other maintenance-only changes do not create a release. After merges to `main`, successful Linux and macOS checks allow semantic-release to publish a version tag, release notes, a signed and notarized universal macOS DMG and its checksum. Version metadata is set before packaging; versions are not committed back to `main`. See [automation setup](automation.md) for the recommended branch rules and first-release behavior.
 
 ## Data and recovery
 
