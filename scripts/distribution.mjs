@@ -43,26 +43,41 @@ export async function verifySigning(environment, run = command) {
 
 function notarize(archive, target, signing, run) {
   const credentials = ['--keychain-profile', 'timi-notarization', '--keychain', signing.keychain];
-  const result = JSON.parse(run('xcrun', [
-    'notarytool', 'submit', archive, ...credentials, '--wait', '--timeout', '20m', '--output-format', 'json',
+  console.log(`[notarization] Uploading ${basename(archive)} to Apple...`);
+  const submission = JSON.parse(run('xcrun', [
+    'notarytool', 'submit', archive, ...credentials, '--output-format', 'json',
   ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] }));
-  if (!result || typeof result.id !== 'string' || typeof result.status !== 'string') {
+  if (!submission || typeof submission.id !== 'string' || !submission.id.trim()) {
+    throw new Error('Apple notarization returned an invalid submission response.');
+  }
+  console.log(`[notarization] Submission ID: ${submission.id}`);
+  console.log(`[notarization] Waiting up to 60 minutes for Apple to process ${basename(archive)}...`);
+  run('xcrun', [
+    'notarytool', 'wait', submission.id, ...credentials, '--timeout', '60m', '--output-format', 'normal', '--progress',
+  ], { stdio: 'inherit' });
+  const result = JSON.parse(run('xcrun', [
+    'notarytool', 'info', submission.id, ...credentials, '--output-format', 'json',
+  ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] }));
+  if (!result || result.id !== submission.id || typeof result.status !== 'string') {
     throw new Error('Apple notarization returned an invalid response.');
   }
-  console.log(`Apple notarization ${result.id}: ${result.status}`);
+  console.log(`[notarization] Apple notarization ${result.id}: ${result.status}`);
   if (result.status !== 'Accepted') {
     run('xcrun', ['notarytool', 'log', result.id, ...credentials]);
     throw new Error(`Apple notarization ${result.id} was not accepted: ${result.status}.`);
   }
+  console.log(`[notarization] Stapling and validating the ticket for ${basename(target)}...`);
   run('xcrun', ['stapler', 'staple', target]);
   run('xcrun', ['stapler', 'validate', target]);
 }
 
 export async function createDmg({ appPath, outputPath, staging, signing }, run = command) {
+  console.log('[package] Verifying the application signature...');
   run('codesign', ['--verify', '--deep', '--strict', appPath]);
   if (signing) {
     // Staple the app before copying it into the DMG so the installed copy also works offline.
     const archive = join(staging, 'notarization.zip');
+    console.log('[notarization] Creating the internal app submission archive...');
     run('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', appPath, archive]);
     notarize(archive, appPath, signing, run);
     run('codesign', ['--verify', '--deep', '--strict', appPath]);
@@ -70,6 +85,7 @@ export async function createDmg({ appPath, outputPath, staging, signing }, run =
   }
 
   const contents = join(staging, 'dmg');
+  console.log('[package] Creating the DMG with the app and Applications shortcut...');
   await mkdir(contents);
   run('ditto', [appPath, join(contents, 'timi.app')]);
   await symlink('/Applications', join(contents, 'Applications'));
@@ -77,10 +93,12 @@ export async function createDmg({ appPath, outputPath, staging, signing }, run =
   run('hdiutil', ['create', '-volname', 'timi', '-srcfolder', contents, '-fs', 'HFS+', '-format', 'UDZO', image]);
   run('hdiutil', ['verify', image]);
   if (signing) {
+    console.log('[package] Signing the DMG with Developer ID...');
     run('codesign', ['--force', '--sign', signing.identity, '--keychain', signing.keychain, '--timestamp', image]);
     notarize(image, image, signing, run);
     run('codesign', ['--verify', '--strict', image]);
     run('spctl', ['--assess', '--type', 'open', '--context', 'context:primary-signature', '--verbose=2', image]);
   }
   await rename(image, outputPath);
+  console.log(`[package] DMG ready: ${outputPath}`);
 }

@@ -27,17 +27,32 @@ try {
   await cp('dist', source, { recursive: true });
   await cp('LICENSE', join(source, 'LICENSE'));
   await writeFile(join(source, 'package.json'), JSON.stringify({ name: 'timi', version: metadata.version, main: 'main.cjs', license: 'MIT' }));
+  console.log(`[package] Building ${arch} application${flags.universal ? ' and merging Intel and Apple Silicon slices' : ''}...`);
+  let signingStarted = false;
   const paths = await packager({
     dir: source, out: 'release', name: 'timi', platform: 'darwin', arch,
     electronVersion: metadata.devDependencies.electron, appBundleId: 'work.timi.app',
     appCategoryType: 'public.app-category.productivity', icon,
     overwrite: true, asar: true, prune: true,
-    osxSign: signing,
+    osxSign: signing && {
+      ...signing,
+      optionsForFile: filePath => {
+        if (!signingStarted) {
+          console.log('[package] Signing the merged application and nested code with Developer ID...');
+          signingStarted = true;
+        }
+        return signing.optionsForFile(filePath);
+      },
+    },
     extendInfo: { LSUIElement: true, LSMinimumSystemVersion: '13.0', CFBundleDevelopmentRegion: 'en', CFBundleLocalizations: ['en', 'de'] },
   });
+  console.log(`[package] Application packaging${signing ? ' and Developer ID signing' : ''} completed.`);
   for (const path of paths) {
     const appPath = resolve(path, 'timi.app');
-    if (!signing) execFileSync('codesign', ['--force', '--deep', '--sign', '-', appPath], { stdio: 'inherit' });
+    if (!signing) {
+      console.log('[package] Ad-hoc signing the local development app...');
+      execFileSync('codesign', ['--force', '--deep', '--sign', '-', appPath], { stdio: 'inherit' });
+    }
     const outputPath = resolve('release', `timi-mac-${arch}.dmg`);
     await createDmg({ appPath, outputPath, staging, signing });
     console.log(appPath);

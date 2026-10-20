@@ -115,8 +115,11 @@ function commands(results = ['Accepted', 'Accepted'], fail = () => false) {
     if (command === 'ditto' && args.length === 2) cpSync(args[0], args[1], { recursive: true });
     if (command === 'hdiutil' && args[0] === 'create') writeFileSync(args.at(-1), 'new disk image');
     if (command === 'xcrun' && args[0] === 'notarytool' && args[1] === 'submit') {
-      const status = results[submission++];
-      return JSON.stringify({ id: `submission-${submission}`, status });
+      submission++;
+      return JSON.stringify({ id: `submission-${submission}` });
+    }
+    if (command === 'xcrun' && args[0] === 'notarytool' && args[1] === 'info') {
+      return JSON.stringify({ id: `submission-${submission}`, status: results[submission - 1] });
     }
     return '';
   };
@@ -140,7 +143,13 @@ test('local DMGs contain the app and Applications shortcut without requiring App
 test('signed DMGs notarize and staple the app before copying, then sign, notarize and staple the image', async t => {
   const options = { ...await fixture(t), signing };
   const { calls, run } = commands();
-  await createDmg(options, (command, args) => {
+  const messages = [];
+  t.mock.method(console, 'log', message => messages.push(message));
+  await createDmg(options, (command, args, commandOptions) => {
+    if (command === 'xcrun' && args[0] === 'notarytool' && args[1] === 'wait') {
+      assert.ok(messages.includes(`[notarization] Submission ID: ${args[2]}`), 'Submission ID must be visible before waiting');
+      assert.equal(commandOptions.stdio, 'inherit', 'Native progress must be streamed to the job log');
+    }
     const result = run(command, args);
     if (command === 'xcrun' && args[0] === 'stapler' && args[1] === 'staple' && args[2] === options.appPath) {
       writeFileSync(join(options.appPath, 'stapled-ticket'), 'offline verification');
@@ -153,6 +162,8 @@ test('signed DMGs notarize and staple the app before copying, then sign, notariz
     ['codesign', '--verify'],
     ['ditto', '-c'],
     ['xcrun', 'notarytool', 'submit'],
+    ['xcrun', 'notarytool', 'wait'],
+    ['xcrun', 'notarytool', 'info'],
     ['xcrun', 'stapler', 'staple'],
     ['xcrun', 'stapler', 'validate'],
     ['codesign', '--verify'],
@@ -162,6 +173,8 @@ test('signed DMGs notarize and staple the app before copying, then sign, notariz
     ['hdiutil', 'verify'],
     ['codesign', '--force'],
     ['xcrun', 'notarytool', 'submit'],
+    ['xcrun', 'notarytool', 'wait'],
+    ['xcrun', 'notarytool', 'info'],
     ['xcrun', 'stapler', 'staple'],
     ['xcrun', 'stapler', 'validate'],
     ['codesign', '--verify'],
@@ -169,8 +182,21 @@ test('signed DMGs notarize and staple the app before copying, then sign, notariz
   ]);
   const submissions = calls.filter(call => call[1] === 'notarytool' && call[2] === 'submit');
   for (const call of submissions) {
-    assert.ok(call.includes('--wait'));
-    assert.equal(call[call.indexOf('--timeout') + 1], '20m');
+    assert.equal(call.includes('--wait'), false);
+    assert.equal(call.includes('--timeout'), false);
+  }
+  const waits = calls.filter(call => call[1] === 'notarytool' && call[2] === 'wait');
+  assert.equal(waits.length, 2);
+  for (const call of waits) {
+    assert.equal(call[call.indexOf('--timeout') + 1], '60m');
+    assert.equal(call[call.indexOf('--output-format') + 1], 'normal');
+    assert.ok(call.includes('--progress'));
+  }
+  const infos = calls.filter(call => call[1] === 'notarytool' && call[2] === 'info');
+  assert.equal(infos.length, 2);
+  assert.deepEqual(waits.map(call => call[3]), ['submission-1', 'submission-2']);
+  assert.deepEqual(infos.map(call => call[3]), ['submission-1', 'submission-2']);
+  for (const call of [...submissions, ...waits, ...infos]) {
     assert.equal(call[call.indexOf('--keychain-profile') + 1], 'timi-notarization');
     assert.equal(call[call.indexOf('--keychain') + 1], signing.keychain);
     assert.equal(call.includes('--password'), false);
@@ -181,6 +207,41 @@ test('signed DMGs notarize and staple the app before copying, then sign, notariz
   assert.equal(imageSignature[imageSignature.indexOf('--sign') + 1], hash);
   assert.ok(imageSignature.includes('--timestamp'));
   assert.ok(calls.at(-1).includes('context:primary-signature'));
+  assert.ok(messages.some(message => message.includes('Creating the DMG')));
+  assert.ok(messages.some(message => message.includes('Signing the DMG')));
+  assert.equal(messages.at(-1), `[package] DMG ready: ${options.outputPath}`);
+});
+
+test('a notarization timeout preserves the prior DMG and leaves the submission ID visible without resubmitting', async t => {
+  const options = { ...await fixture(t), signing };
+  const messages = [];
+  t.mock.method(console, 'log', message => messages.push(message));
+  const { calls, run } = commands();
+  const timeout = new Error('Timeout of 3600 second(s) was reached before processing completed.');
+  await assert.rejects(createDmg(options, (command, args) => {
+    const result = run(command, args);
+    if (command === 'xcrun' && args[0] === 'notarytool' && args[1] === 'wait') throw timeout;
+    return result;
+  }), error => error === timeout);
+  assert.equal(await readFile(options.outputPath, 'utf8'), 'previous release');
+  assert.ok(messages.includes('[notarization] Submission ID: submission-1'));
+  assert.equal(calls.filter(call => call[1] === 'notarytool' && call[2] === 'submit').length, 1);
+  assert.equal(calls.some(call => call[1] === 'notarytool' && call[2] === 'info'), false);
+  assert.equal(calls.some(call => call[1] === 'stapler'), false);
+  assert.equal(messages.some(message => message.includes('DMG ready')), false);
+});
+
+test('an accepted status for a different submission is rejected before stapling or replacing the DMG', async t => {
+  const options = { ...await fixture(t), signing };
+  const { calls, run } = commands();
+  await assert.rejects(createDmg(options, (command, args) => {
+    const result = run(command, args);
+    return command === 'xcrun' && args[0] === 'notarytool' && args[1] === 'info'
+      ? JSON.stringify({ id: 'different-submission', status: 'Accepted' })
+      : result;
+  }), /invalid response/);
+  assert.equal(await readFile(options.outputPath, 'utf8'), 'previous release');
+  assert.equal(calls.some(call => call[1] === 'stapler'), false);
 });
 
 test('rejected or incomplete notarization preserves the previous DMG and reports Apple diagnostics', async t => {
@@ -208,7 +269,7 @@ test('malformed Apple responses and native command failures never produce a rele
       assert.equal(await readFile(options.outputPath, 'utf8'), 'previous release');
     });
   }
-  for (const target of ['codesign', 'ditto', 'create', 'verify', 'submit', 'staple', 'validate', 'spctl', '--force']) {
+  for (const target of ['codesign', 'ditto', 'create', 'verify', 'submit', 'wait', 'info', 'staple', 'validate', 'spctl', '--force']) {
     await t.test(target, async t => {
       const options = { ...await fixture(t), signing };
       const { run } = commands(['Accepted', 'Accepted'], (command, args) => command === target || args.includes(target));

@@ -159,7 +159,7 @@ npm run test:native        # Real Electron integration checks on a Mac desktop
 npm run package:universal  # Local development DMG for Apple Silicon and Intel
 ```
 
-See the [build guide](docs/guide.md#build-and-verify) for host-architecture builds and packaged-app checks, and [verification notes](docs/verification.md) for test coverage and native testing limits.
+See the [build guide](docs/guide.md#build-and-verify) for host-architecture builds, packaged-app checks and native testing limits.
 
 ## Contribute
 
@@ -170,8 +170,7 @@ timi's focus is simple, private project time tracking. It currently has no invoi
 Run `npm run check` before opening a pull request. Use a Conventional Commit PR title such as `fix: …`, `feat: …`, or `docs: …`; releases are automated after checks pass on `main`.
 
 - [User and developer guide](docs/guide.md)
-- [Verification and known testing limits](docs/verification.md)
-- [CI, reviews, and releases](docs/automation.md)
+- [Releases and signing](docs/guide.md#release-signing)
 - [Code review rules](AGENTS.md)
 - [Refresh the README screenshots](docs/screenshots.md)
 
