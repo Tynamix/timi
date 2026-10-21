@@ -1,0 +1,46 @@
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import test from 'node:test';
+import { createUpdateArchive, updateArchiveName, updateManifest, verifyUpdateSignature } from '../scripts/updater.mjs';
+
+test('the final stapled app is archived, signed for its version and published for both Mac architectures', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'timi-updater-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const keyPath = join(directory, 'test.key');
+  const cli = resolve('node_modules/.bin/tauri');
+  execFileSync(cli, ['signer', 'generate', '--ci', '--password', '', '--write-keys', keyPath], { stdio: 'ignore' });
+  const publicKey = (await readFile(`${keyPath}.pub`, 'utf8')).trim();
+  const appPath = join(directory, 'timi.app');
+  await mkdir(join(appPath, 'Contents', 'MacOS'), { recursive: true });
+  await writeFile(join(appPath, 'Contents', 'MacOS', 'timi'), 'signed application', { mode: 0o755 });
+  await writeFile(join(appPath, 'Contents', 'stapled-ticket'), 'offline notarization');
+  await symlink('MacOS/timi', join(appPath, 'Contents', 'executable-link'));
+  const environment = { ...process.env, TAURI_SIGNING_PRIVATE_KEY: await readFile(keyPath, 'utf8'), TAURI_SIGNING_PRIVATE_KEY_PASSWORD: '' };
+  const archive = await createUpdateArchive({ appPath, directory, version: '1.2.3', publicKey, environment });
+  assert.equal(archive, join(directory, updateArchiveName));
+  const manifest = JSON.parse(await readFile(join(directory, 'latest.json'), 'utf8'));
+  const signature = (await readFile(`${archive}.sig`, 'utf8')).trim();
+  assert.deepEqual(manifest, updateManifest('1.2.3', signature));
+  assert.deepEqual(Object.keys(manifest.platforms), ['darwin-aarch64', 'darwin-x86_64']);
+  assert.equal(manifest.platforms['darwin-aarch64'].url, `https://github.com/Tynamix/timi/releases/download/v1.2.3/${updateArchiveName}`);
+  const extracted = join(directory, 'extracted'); await mkdir(extracted);
+  execFileSync('tar', ['-xzf', archive, '-C', extracted]);
+  assert.equal(await readFile(join(extracted, 'timi.app/Contents/stapled-ticket'), 'utf8'), 'offline notarization');
+  assert.equal((await stat(join(extracted, 'timi.app/Contents/MacOS/timi'))).mode & 0o777, 0o755);
+  assert.equal(await readFile(join(extracted, 'timi.app/Contents/executable-link'), 'utf8'), 'signed application');
+
+  const bytes = await readFile(archive);
+  assert.doesNotThrow(() => verifyUpdateSignature(bytes, signature, publicKey, '1.2.3'));
+  assert.throws(() => verifyUpdateSignature(Buffer.from('tampered app'), signature, publicKey, '1.2.3'), /signature/);
+  assert.throws(() => verifyUpdateSignature(bytes, signature, publicKey, '1.2.4'), /signed version/);
+  const commentTampered = Buffer.from(Buffer.from(signature, 'base64').toString().replace('version:1.2.3', 'version:1.2.4')).toString('base64');
+  assert.throws(() => verifyUpdateSignature(bytes, commentTampered, publicKey, '1.2.4'), /signature/);
+  const otherKey = join(directory, 'other.key');
+  execFileSync(cli, ['signer', 'generate', '--ci', '--password', '', '--write-keys', otherKey], { stdio: 'ignore' });
+  const otherPublicKey = await readFile(`${otherKey}.pub`, 'utf8');
+  assert.throws(() => verifyUpdateSignature(bytes, signature, otherPublicKey, '1.2.3'), /signature/);
+  await assert.rejects(createUpdateArchive({ appPath, directory, version: '1.2.3', publicKey, environment: {} }), /TAURI_SIGNING_PRIVATE_KEY/);
+});

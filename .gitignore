@@ -2,6 +2,7 @@ node_modules/
 dist/
 release/
 .cache/
+.secrets/
 .npm-logs/
 artifacts/
 *.sqlite
@@ -9,6 +10,7 @@ artifacts/
 *.sqlite-wal
 .DS_Store
 *.p12
+*.key
 *.keychain
 *.keychain-db
 *.keychain-db-*

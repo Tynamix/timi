@@ -31,5 +31,14 @@
       "entitlements": "../assets/entitlements.plist",
       "infoPlist": "Info.plist"
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENBOEQ4ODMwRDFDRDE3QTIKUldTaUY4M1JNSWlOeWw0Sk5MRkdzZE55VXp2S0xqeUU2aDRQR3htL0FyZWNqS0hOa2tQZG5wQ2YK",
+      "endpoints": [
+        "https://github.com/Tynamix/timi/releases/latest/download/latest.json"
+      ],
+      "requireSignedVersion": true
+    }
   }
 }

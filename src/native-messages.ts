@@ -1,6 +1,7 @@
 import type { Locale } from './shared';
 export const nativeMessages = {
   en: {
+    updateCheck: 'Check for updates…', updateInstall: 'Version {version} – Update and restart', updateRestart: 'Retry update restart', updateChecking: 'Checking for updates…', updateDownloading: 'Downloading update…', updateInstalling: 'Installing update…',
     remainingToday: 'Remaining today',
     dailyGoalTitle: 'Daily working time reached', dailyGoalBody: 'You have reached your daily target of {time} hours.',
     weeklyGoalTitle: 'Weekly working time reached', weeklyGoalBody: 'You have reached your weekly target of {time} hours.',
@@ -13,6 +14,7 @@ export const nativeMessages = {
     retry: 'Retry', stayOpen: 'Keep timi open', exit: 'Close', edit: 'Edit', undo: 'Undo', redo: 'Redo', cut: 'Cut', copy: 'Copy', paste: 'Paste', selectAll: 'Select All',
   },
   de: {
+    updateCheck: 'Nach Updates suchen…', updateInstall: 'Version {version} – Aktualisieren und neu starten', updateRestart: 'Update-Neustart erneut versuchen', updateChecking: 'Updates werden gesucht…', updateDownloading: 'Update wird geladen…', updateInstalling: 'Update wird installiert…',
     remainingToday: 'Heute verbleibend',
     dailyGoalTitle: 'Tagesarbeitszeit erreicht', dailyGoalBody: 'Du hast dein Tagesziel von {time} Stunden erreicht.',
     weeklyGoalTitle: 'Wochenarbeitszeit erreicht', weeklyGoalBody: 'Du hast dein Wochenziel von {time} Stunden erreicht.',

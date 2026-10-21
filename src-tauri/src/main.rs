@@ -4,6 +4,7 @@ mod engine;
 mod platform;
 #[cfg(test)]
 mod tests;
+mod updates;
 
 use engine::Engine;
 use serde_json::{json, Value};
@@ -22,12 +23,15 @@ use tauri::{
     webview::{NewWindowResponse, PermissionResponse},
     Emitter, Manager, WebviewUrl, WebviewWindow,
 };
+use tauri_plugin_updater::UpdaterExt;
+use updates::{UpdateLifecycle, Updates};
 
 type App = tauri::AppHandle;
 type Shared = Mutex<Desktop>;
 struct TrayMenu {
     menu: Menu<tauri::Wry>,
     stop: MenuItem<tauri::Wry>,
+    update: MenuItem<tauri::Wry>,
 }
 
 struct Desktop {
@@ -46,6 +50,18 @@ struct Desktop {
     receipts: HashMap<String, Value>,
     retry: HashMap<String, Instant>,
     receipt_retry: Instant,
+    updates: Updates,
+}
+
+impl UpdateLifecycle for Desktop {
+    fn checkpoint(&mut self) -> Result<(), Value> {
+        self.sample()?;
+        self.call("checkpoint", Value::Null).map(|_| ())
+    }
+    fn shutdown(&mut self) -> Result<(), Value> {
+        self.sample()?;
+        self.call("quit", Value::Null).map(|_| ())
+    }
 }
 
 fn failure(code: &str) -> Value {
@@ -63,6 +79,145 @@ fn duration(ms: f64) -> String {
 }
 
 impl Desktop {
+    fn update_changed(&self, app: &App) {
+        if let Some(menu) = app.try_state::<TrayMenu>() {
+            let label = match self.updates.phase {
+                "checking" => self.msg("updateChecking").to_owned(),
+                "downloading" => self.msg("updateDownloading").to_owned(),
+                "installing" => self.msg("updateInstalling").to_owned(),
+                "restart" => self.msg("updateRestart").to_owned(),
+                _ => self
+                    .updates
+                    .release
+                    .as_ref()
+                    .map(|release| {
+                        self.msg("updateInstall")
+                            .replace("{version}", &release.version)
+                    })
+                    .unwrap_or_else(|| self.msg("updateCheck").to_owned()),
+            };
+            let _ = menu.update.set_text(label);
+            let _ = menu
+                .update
+                .set_enabled(!self.updates.busy() && self.updates.phase != "disabled");
+        }
+        let _ = app.emit("timi:update", self.updates.view());
+    }
+    fn check_update(&mut self, app: &App) -> Result<Value, Value> {
+        if self.quitting
+            || self.updates.phase == "disabled"
+            || self.updates.busy()
+            || self.updates.installed
+        {
+            return Err(failure("INVALID_COMMAND"));
+        }
+        self.updates.phase = "checking";
+        self.updates.error = None;
+        self.update_changed(app);
+        let handle = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let result = async {
+                handle
+                    .updater_builder()
+                    .timeout(Duration::from_secs(20))
+                    .build()?
+                    .check()
+                    .await
+            }
+            .await;
+            let app = handle.clone();
+            let _ = handle.run_on_main_thread(move || {
+                let shared = app.state::<Shared>();
+                let mut state = shared.lock().unwrap();
+                if state.quitting {
+                    return;
+                }
+                match result {
+                    Ok(release) => {
+                        // Only this repository's versioned release assets may be downloaded.
+                        if release.as_ref().is_some_and(|r| {
+                            !updates::allowed_release_url(r.download_url.as_str(), &r.version)
+                        }) {
+                            state.updates.failed(failure("UPDATE_ERROR"));
+                        } else {
+                            state.updates.phase = if release.is_some() {
+                                "available"
+                            } else {
+                                "current"
+                            };
+                            state.updates.release = release;
+                        }
+                    }
+                    Err(_) => state.updates.failed(failure("UPDATE_ERROR")),
+                }
+                state.update_changed(&app);
+            });
+        });
+        Ok(self.updates.view())
+    }
+    fn install_update(&mut self, app: &App) -> Result<Value, Value> {
+        if self.quitting || self.updates.busy() || self.updates.phase == "disabled" {
+            return Err(failure("INVALID_COMMAND"));
+        }
+        let mut release = self
+            .updates
+            .release
+            .clone()
+            .ok_or_else(|| failure("INVALID_COMMAND"))?;
+        self.updates.error = None;
+        if self.updates.installed {
+            self.finish_update(app, release, &[]);
+            return Ok(self.updates.view());
+        }
+        self.updates.phase = "downloading";
+        self.update_changed(app);
+        release.timeout = Some(Duration::from_secs(600));
+        let handle = app.clone();
+        tauri::async_runtime::spawn(async move {
+            // Signature verification happens before any tracking or application changes.
+            let result = release.download(|_, _| {}, || {}).await;
+            let app = handle.clone();
+            let _ = handle.run_on_main_thread(move || {
+                let shared = app.state::<Shared>();
+                let mut state = shared.lock().unwrap();
+                if state.quitting {
+                    return;
+                }
+                match result {
+                    Ok(bytes) => state.finish_update(&app, release, &bytes),
+                    Err(_) => {
+                        state.updates.failed(failure("UPDATE_ERROR"));
+                        state.update_changed(&app);
+                    }
+                }
+            });
+        });
+        Ok(self.updates.view())
+    }
+    fn finish_update(&mut self, app: &App, release: tauri_plugin_updater::Update, bytes: &[u8]) {
+        self.updates.phase = "installing";
+        self.update_changed(app);
+        let mut installed = self.updates.installed;
+        let result = updates::finish_update(self, &mut installed, || {
+            release.install(bytes).map_err(|_| failure("UPDATE_ERROR"))
+        });
+        self.updates.installed = installed;
+        match result {
+            Ok(()) => {
+                self.quitting = true;
+                platform::allow_termination();
+                app.request_restart();
+            }
+            Err(problem) => {
+                self.updates.failed(problem.clone());
+                if problem["code"] != "UPDATE_ERROR" {
+                    self.report(app, problem);
+                }
+                self.update_changed(app);
+                self.refresh(app);
+            }
+        }
+    }
     fn call(&mut self, method: &str, args: Value) -> Result<Value, Value> {
         let reply = self
             .engine
@@ -233,7 +388,12 @@ impl Desktop {
                 String::new()
             };
             if let Some(tray) = app.tray_by_id("timi") {
-                let _ = tray.set_title(Some(format!("{prefix}{text}")));
+                let update = if self.updates.release.is_some() {
+                    " ↑"
+                } else {
+                    ""
+                };
+                let _ = tray.set_title(Some(format!("{prefix}{text}{update}")));
                 let _ = tray.set_tooltip(Some(format!(
                     "timi · {remainder}{}: {}\n{status}",
                     self.msg("today"),
@@ -369,6 +529,11 @@ impl Desktop {
         value: Value,
     ) -> Result<Value, Value> {
         match action {
+            "update-status" if value.is_null() => Ok(self.updates.view()),
+            "update-check" if kind == "overview" && value.is_null() => self.check_update(app),
+            "update-install" if kind != "clarification" && value.is_null() => {
+                self.install_update(app)
+            }
             "snapshot" => self.call("snapshot", value),
             "command" => self.execute(app, value),
             "environment" => Ok(
@@ -400,6 +565,7 @@ impl Desktop {
             }
             "quit" => self.quit(app),
             "ready" => {
+                self.update_changed(app);
                 self.ready.insert(kind.into());
                 if kind == "overview" {
                     if let Some(window) = app.get_webview_window(kind) {
@@ -488,6 +654,22 @@ fn menu_action(app: &App, id: &str) {
     let shared = app.state::<Shared>();
     let mut state = shared.lock().unwrap();
     match id {
+        "update" => {
+            if state.updates.busy() {
+                return;
+            }
+            let result = if state.updates.release.is_some() {
+                state.install_update(app)
+            } else {
+                state.workspace(app, "settings");
+                state.check_update(app)
+            };
+            if let Err(problem) = result {
+                if problem["code"] != "INVALID_COMMAND" {
+                    state.report(app, problem);
+                }
+            }
+        }
         "entry" => state.entry(app),
         "overview" | "settings" => state.workspace(app, id),
         "stop" => {
@@ -610,6 +792,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         receipts: HashMap::new(),
         retry: HashMap::new(),
         receipt_retry: Instant::now(),
+        updates: Updates::new(!cfg!(debug_assertions) && platform::is_packaged()),
     };
     state.messages = state
         .call("presentation", json!(state.locale))
@@ -620,16 +803,25 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let stop = item("stop")?;
     let overview = item("overview")?;
     let settings = item("settings")?;
+    let update = MenuItem::with_id(
+        app,
+        "update",
+        state.msg("updateCheck"),
+        state.updates.phase != "disabled",
+        None::<&str>,
+    )?;
     let quit = MenuItem::with_id(app, "quit", state.msg("quit"), true, Some("Cmd+Q"))?;
     let separator = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(
         app,
-        &[&entry, &stop, &overview, &settings, &separator, &quit],
+        &[
+            &entry, &stop, &overview, &settings, &update, &separator, &quit,
+        ],
     )?;
     let main_menu = Menu::with_items(
         app,
         &[
-            &Submenu::with_items(app, "timi", true, &[&quit])?,
+            &Submenu::with_items(app, "timi", true, &[&update, &quit])?,
             &Submenu::with_items(
                 app,
                 state.msg("edit"),
@@ -650,6 +842,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(TrayMenu {
         menu: menu.clone(),
         stop,
+        update,
     });
     app.manage(Mutex::new(state));
     let tray = TrayIconBuilder::with_id("timi")
@@ -780,6 +973,31 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         }
         state.refresh(app.handle());
     }
+    let handle = app.handle().clone();
+    if !cfg!(debug_assertions) && platform::is_packaged() {
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(10));
+            loop {
+                let app = handle.clone();
+                if handle
+                    .run_on_main_thread(move || {
+                        let shared = app.state::<Shared>();
+                        let mut state = shared.lock().unwrap();
+                        // Keep an available update or error visible until the user acts.
+                        if matches!(state.updates.phase, "idle" | "current" | "error")
+                            && state.updates.release.is_none()
+                        {
+                            let _ = state.check_update(&app);
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+                std::thread::sleep(Duration::from_secs(6 * 60 * 60));
+            }
+        });
+    }
     Ok(())
 }
 
@@ -790,6 +1008,7 @@ fn main() {
         context.config_mut().identifier.push_str(".debug");
     }
     let application = tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             // The macOS plugin invokes this callback on its async listener thread.
             // Never hold tracking state there while window APIs wait for the main thread.

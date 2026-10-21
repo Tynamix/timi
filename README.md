@@ -32,6 +32,8 @@ timi helps you keep track through the interruptions of a real working day. When 
 
 **Private by design.** Your records stay on your Mac, and the installed app works entirely offline. There are no accounts, analytics, or synchronization services. To detect inactivity, timi reads how long your Mac has been idle; it never reads what you type or which apps you use.
 
+**Updates when you choose.** Release builds check GitHub for a newer version after startup and every six hours. An **↑** beside the menu-bar timer signals an available update. Choose **Update and restart** directly in the tracking window, weekly overview or menu-bar menu; Settings also offers manual checks. Updates are signed and verified; timi saves your time records before restarting and starts untracked. Tracking works without internet. Versions without the updater need one manual installation first.
+
 **Your working week, on your terms.** Set a different target for each weekday, including shorter days and days off. See time worked or time remaining in the menu bar, and optionally get a macOS notification when your daily or weekly target is reached. Reaching a target keeps the timer running; you choose when to stop.
 
 **Small enough to stay out of your way.** Your daily timer sits in the menu bar, with no permanent Dock icon. Type a project and press Enter to start or switch. Pause for a break, Play to continue, Stop when you're done. Every launch starts untracked, so opening the app never starts the clock for you.
@@ -130,7 +132,7 @@ To back up, quit timi and copy the whole data directory.
 
 SQLite transactions and durable checkpoints keep changes consistent. If a write fails, timi preserves the previous state and lets you retry; a failed quit leaves the app open. After a crash, recovery stops at the latest durable checkpoint. It never invents working time while the app was closed or resumes tracking on its own.
 
-The interface runs in Tauri’s isolated macOS WebKit webviews with a narrow, validated IPC interface and blocked runtime network access. The TypeScript tracking core runs separately in system JavaScriptCore and stores records through native SQLite. Only macOS is currently supported.
+The interface runs in Tauri’s isolated macOS WebKit webviews with a narrow, validated IPC interface and blocked renderer network access. Only the native updater contacts GitHub to check and download releases; time records are never sent. The TypeScript tracking core runs separately in system JavaScriptCore and stores records through native SQLite. Only macOS is currently supported.
 
 [Data, recovery, and migration details →](docs/guide.md#data-and-recovery)
 

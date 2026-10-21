@@ -9,11 +9,14 @@ export default {
     // publishing to npm or committing generated versions back to main.
     ['@semantic-release/npm', { npmPublish: false }],
     ['@semantic-release/exec', {
-      prepareCmd: 'npm run package:universal -- --signed && cd release && shasum -a 256 timi-mac-universal.dmg > SHA256SUMS',
+      prepareCmd: 'node scripts/prepare-release.mjs',
     }],
     ['@semantic-release/github', {
       assets: [
         { path: 'release/timi-mac-universal.dmg', label: 'timi for macOS (Apple Silicon + Intel)' },
+        { path: 'release/timi-mac-universal.app.tar.gz', label: 'Signed in-app update (Apple Silicon + Intel)' },
+        { path: 'release/timi-mac-universal.app.tar.gz.sig', label: 'Update signature' },
+        { path: 'release/latest.json', label: 'Update manifest' },
         { path: 'release/SHA256SUMS', label: 'SHA-256 checksums' },
       ],
       releaseBodyTemplate: '<%= nextRelease.notes %>\n\n## Download and install\nDownload **timi-mac-universal.dmg** below, open it and drag **timi** to **Applications**. Eject the disk image and launch timi from Applications. Requires macOS 13 or later; supports Apple Silicon and Intel.\n\nThe app and disk image are Developer ID signed and notarized by Apple, with notarization tickets attached for offline verification. macOS may still ask you to confirm opening an app downloaded from the internet.\n\nVerify the download with `shasum -a 256 -c SHA256SUMS` in the directory containing both downloaded files.',

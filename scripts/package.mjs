@@ -4,6 +4,7 @@ import { resolve, join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { createDmg, signingOptions } from './distribution.mjs';
 import { rustEnvironment } from './rust-environment.mjs';
+import { createUpdateArchive } from './updater.mjs';
 
 if (process.platform !== 'darwin') throw new Error('Package on macOS 13 or later.');
 const { values: flags } = parseArgs({ options: { universal: { type: 'boolean' }, signed: { type: 'boolean' } } });
@@ -11,6 +12,8 @@ const arch = flags.universal ? 'universal' : process.arch;
 if (!['universal', 'arm64', 'x64'].includes(arch)) throw new Error(`Unsupported Mac architecture: ${arch}`);
 const target = { universal: 'universal-apple-darwin', arm64: 'aarch64-apple-darwin', x64: 'x86_64-apple-darwin' }[arch];
 const signing = flags.signed ? signingOptions(process.env) : undefined;
+if (signing && arch !== 'universal') throw new Error('Signed updater releases require --universal.');
+if (signing && !process.env.TAURI_SIGNING_PRIVATE_KEY?.trim()) throw new Error('Signed releases require TAURI_SIGNING_PRIVATE_KEY.');
 if (!signing) console.warn('Local development DMG: ad-hoc signed, not Apple-notarized. Do not publish this build.');
 const metadata = JSON.parse(await readFile('package.json', 'utf8'));
 await mkdir('release', { recursive: true });
@@ -39,6 +42,20 @@ try {
   }
   const outputPath = resolve('release', `timi-mac-${arch}.dmg`);
   await createDmg({ appPath: stagedApp, outputPath, staging, signing });
+  if (signing) {
+    const configuration = JSON.parse(await readFile('src-tauri/tauri.conf.json', 'utf8'));
+    const archive = await createUpdateArchive({ appPath: stagedApp, directory: staging, version: metadata.version, publicKey: configuration.plugins.updater.pubkey });
+    const extracted = join(staging, 'update-check');
+    await mkdir(extracted);
+    execFileSync('tar', ['-xzf', archive, '-C', extracted], { stdio: 'inherit' });
+    const extractedApp = join(extracted, 'timi.app');
+    execFileSync('codesign', ['--verify', '--deep', '--strict', extractedApp], { stdio: 'inherit' });
+    execFileSync('xcrun', ['stapler', 'validate', extractedApp], { stdio: 'inherit' });
+    execFileSync('spctl', ['--assess', '--type', 'execute', '--verbose=2', extractedApp], { stdio: 'inherit' });
+    for (const name of ['timi-mac-universal.app.tar.gz', 'timi-mac-universal.app.tar.gz.sig', 'latest.json']) {
+      await cp(join(staging, name), resolve('release', name));
+    }
+  }
   const appPath = resolve('release', `timi-darwin-${arch}`, 'timi.app');
   await mkdir(resolve('release', `timi-darwin-${arch}`), { recursive: true });
   await rm(appPath, { recursive: true, force: true });

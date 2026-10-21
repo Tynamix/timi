@@ -43,6 +43,7 @@ try {
         value = application.execute(args[0]);
         queueMicrotask(() => { for (const view of context.pages()) void view.evaluate(() => window.dispatchEvent(new Event('timi:changed'))); });
       } else if (method === 'environment') value = { locale: 'en', version, loginAvailable: false, launchAtLogin: false, launchAtLoginStatus: 'not-registered', packaged: false };
+      else if (method === 'updateStatus') value = { phase: 'disabled', version: null, error: null };
       else if (method === 'workspaceView') value = workspaceView;
       else if (method === 'openWindow') {
         workspaceView = args[0];
@@ -59,6 +60,7 @@ try {
       return () => window.removeEventListener(event, handler);
     };
     window.timi = {
+      updateStatus: call('updateStatus'), checkUpdate: call('checkUpdate'), installUpdate: call('installUpdate'), onUpdate: listen('timi:update'),
       snapshot: call('snapshot'), command: call('command'), environment: call('environment'),
       workspaceView: call('workspaceView'), openWindow: call('openWindow'),
       closeWindow: call('closeWindow'), quit: call('quit'), setLaunchAtLogin: call('setLaunchAtLogin'),

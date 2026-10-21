@@ -2,7 +2,7 @@
 
 [← Back to the README](../README.md)
 
-A local, offline menu-bar time tracker for macOS 13 or later. Tauri 2, Rust, TypeScript, system WebKit/JavaScriptCore, plain HTML/CSS, and SQLite. MIT licensed. No accounts, synchronization, analytics, remote assets, or runtime network requests.
+A local, offline menu-bar time tracker for macOS 13 or later. Tauri 2, Rust, TypeScript, system WebKit/JavaScriptCore, plain HTML/CSS, and SQLite. MIT licensed. No accounts, synchronization, analytics, or remote interface assets. Only the native updater makes network requests to check and download GitHub releases; tracking works offline.
 
 ## Install and run
 
@@ -90,12 +90,24 @@ An active paid Apple Developer Program membership and a **Developer ID Applicati
 | `APPLE_ID` | Apple Account email for notarization |
 | `APPLE_TEAM_ID` | The certificate's ten-character Developer Team ID |
 | `APPLE_APP_SPECIFIC_PASSWORD` | An app-specific Apple password, not the normal account password |
+| `TAURI_SIGNING_PRIVATE_KEY` | Entire contents of the Tauri updater private-key file matching `plugins.updater.pubkey` in `src-tauri/tauri.conf.json` |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Optional updater-key password; leave unset for an unencrypted key |
 
 Base64 is not encryption. Never commit certificates containing private keys or passwords. The workflow imports the certificate into a temporary keychain using `apple-actions/import-codesign-certs`, checks actual signing, then signs and notarizes both the app and DMG. Tickets are stapled for offline verification; publication requires Apple's `Accepted` status and successful signature/Gatekeeper checks. Temporary credentials are cleaned up after the job.
 
 Each Apple submission can wait up to 60 minutes; the release-job limit is 150 minutes. Phase messages, submission IDs and native progress appear in the job log. Apple may continue processing after a timeout; query the existing submission before retrying. A later acceptance does not automatically finish an aborted release or cover a differently rebuilt app.
 
 Local signed builds require `APPLE_TEAM_ID`, `MACOS_SIGNING_KEYCHAIN`, and a `timi-notarization` profile stored in that keychain with `xcrun notarytool store-credentials`. Use its interactive password prompt. `node scripts/signing-check.mjs` checks signing without uploading an app; `npm run package:universal -- --signed` builds the trusted DMG.
+
+### In-app updates
+
+Release builds check `https://github.com/Tynamix/timi/releases/latest/download/latest.json` ten seconds after launch and every six hours. Development builds do not check. An **↑** beside the menu-bar timer signals an available update even while all windows are closed. The tracking window and weekly overview show a notice with **Update and restart**; the menu-bar menu also offers that action directly. Settings retains manual checks and installation controls. No update banner interrupts idle clarification. The user initiates downloading and installation; checks and downloads run separately from tracking. Offline checks fail quietly and can be retried. GitHub receives the ordinary request metadata (including the IP address), never time records, project names or the tracking database.
+
+The native Tauri updater verifies the archive signature and signed version. Only versioned update archives from this repository are accepted. Before replacing the app, timi samples activity and writes a durable checkpoint. Before restarting, it samples again and completes the same clean shutdown used by Quit. A persistence failure leaves the app open for retry; if replacement already succeeded, retry repeats only the save and restart. Restart always begins untracked. Install timi in Applications and eject the DMG before updating.
+
+The release pipeline archives the final Developer ID signed, notarized and stapled universal app as `timi-mac-universal.app.tar.gz`, signs it with the updater key and verifies it against the public key bundled in timi. It extracts and checks the app signature, notarization ticket and Gatekeeper acceptance before publishing. `latest.json` points both `darwin-aarch64` and `darwin-x86_64` at that same universal archive; the archive, `.sig` and manifest are published alongside the DMG and its checksum. Earlier timi installations without this updater need one manual upgrade.
+
+The updater key is separate from the Apple Developer ID certificate. Keep a secure backup of the private key and add its complete file contents as the `TAURI_SIGNING_PRIVATE_KEY` repository secret before releasing. The locally generated key is in the ignored `.secrets/timi-updater.key` file; its public key is already configured. Other checkouts need the same private key supplied securely. Never replace the public key casually: existing installations trust the key they shipped with and cannot verify an unrelated replacement. `.secrets/` and `*.key` are ignored by Git.
 
 Before distributing a release, browser-download the DMG, verify its checksum, drag timi to Applications, eject the image and test launch, including offline. Do not bypass Gatekeeper or remove quarantine attributes for this check. Test results belong in CI logs and pull requests, not a running verification diary.
 
@@ -121,6 +133,6 @@ Schema v1 databases receive a consistent `tracking.sqlite.pre-v2-….sqlite` bac
 
 `src-tauri/` provides the Tauri application, native inactivity/power/lock observation, menu bar, notifications, login registration and window lifecycle. `src/desktop.ts` exposes the same narrow typed application interface to the existing HTML/CSS renderer, using validated Tauri commands and application events. The macOS adapter uses system APIs; only macOS is delivered here.
 
-WebKit runs the interface in a separate process with no Node integration or direct database/filesystem access. A restrictive content security policy and native request/navigation handling block runtime network requests and external navigation. Tauri capabilities do not grant general shell, HTTP or filesystem access to the renderer. The app reads the operating system’s elapsed inactivity counter and power/lock events, never input contents or application usage. No global shortcuts, CSV exports, invoices, integrations, or project hierarchies are included.
+WebKit runs the interface in a separate process with no Node integration or direct database/filesystem access. A restrictive content security policy and native request/navigation handling block renderer network requests and external navigation. Tauri capabilities do not grant general shell, HTTP, updater or filesystem access to the renderer. Update operations use the existing validated desktop IPC with no renderer-provided URLs, paths or keys; network access is confined to the native updater. The app reads the operating system’s elapsed inactivity counter and power/lock events, never input contents or application usage. No global shortcuts, CSV exports, invoices, integrations, or project hierarchies are included.
 
 See Tauri’s [process model](https://v2.tauri.app/concept/process-model/), [IPC](https://v2.tauri.app/concept/inter-process-communication/) and [capabilities](https://v2.tauri.app/security/capabilities/), and Apple’s [JavaScriptCore framework](https://developer.apple.com/documentation/javascriptcore).

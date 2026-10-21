@@ -42,8 +42,17 @@ export interface AppError { code: string; details?: Record<string, string | numb
 export type Result<T> = { ok: true; value: T } | { ok: false; error: AppError };
 export type WorkspaceView = 'overview' | 'settings';
 export type WindowKind = 'entry' | 'overview' | 'clarification';
+export interface UpdateStatus {
+  phase: 'disabled' | 'idle' | 'checking' | 'available' | 'current' | 'downloading' | 'installing' | 'restart' | 'error';
+  version: string | null;
+  error: AppError | null;
+}
 export interface Environment { locale: Locale; version: string; loginAvailable: boolean; launchAtLogin: boolean; launchAtLoginStatus: 'not-registered' | 'enabled' | 'requires-approval' | 'not-found'; packaged: boolean }
 export interface DesktopAPI {
+  updateStatus(): Promise<Result<UpdateStatus>>;
+  checkUpdate(): Promise<Result<UpdateStatus>>;
+  installUpdate(): Promise<Result<UpdateStatus>>;
+  onUpdate(callback: (status: UpdateStatus) => void): () => void;
   snapshot(weekOffset?: number): Promise<Result<Snapshot>>;
   command(command: Command): Promise<Result<Snapshot>>;
   environment(): Promise<Result<Environment>>;
