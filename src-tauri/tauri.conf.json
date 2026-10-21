@@ -1,0 +1,35 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "timi",
+  "version": "../package.json",
+  "identifier": "work.timi.app",
+  "build": {
+    "beforeBuildCommand": "npm run build",
+    "beforeDevCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [],
+    "macOSPrivateApi": true,
+    "security": {
+      "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src ipc: http://ipc.localhost; base-uri 'none'; form-action 'none'; frame-src 'none'; object-src 'none'; media-src 'none'; worker-src 'none'",
+      "capabilities": [{
+        "identifier": "desktop-windows",
+        "description": "Local timi windows can use only the validated desktop API and receive application events.",
+        "windows": ["entry", "overview", "clarification"],
+        "permissions": ["allow-desktop", "core:event:allow-listen", "core:event:allow-unlisten"]
+      }]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app"],
+    "category": "Productivity",
+    "icon": ["../assets/timi.icns", "../assets/timi.png"],
+    "macOS": {
+      "minimumSystemVersion": "13.0",
+      "entitlements": "../assets/entitlements.plist",
+      "infoPlist": "Info.plist"
+    }
+  }
+}

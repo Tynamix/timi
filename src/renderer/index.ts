@@ -1,3 +1,4 @@
+import { desktopReady } from '../desktop';
 import { correctionLocalTimes, localMinuteInput } from './time-input';
 import { parseWorkHours } from './work-hours';
 import { dailyTargetMs, hoursMs, weeklyTargetMs } from '../core/work-goals';
@@ -527,6 +528,7 @@ async function initialize(): Promise<void> {
   } else buildClarification();
   update(); if (kind === 'entry') entryInput.focus();
   window.timi.onChanged(() => { void refresh(); }); window.timi.onError(showError); window.timi.onFocus(() => { if (kind === 'entry') entryInput.focus(); if (kind === 'overview' && workspaceView === 'settings') void refreshEnvironment(); void refresh(); });
+  await desktopReady();
   setInterval(() => { if (!document.hidden && !busy) void refresh(); }, 1000);
 }
 if (kind === 'overview') window.timi.onNavigate(showWorkspaceView);
