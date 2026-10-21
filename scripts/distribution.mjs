@@ -17,8 +17,7 @@ export function signingOptions(environment, run = command) {
     .filter(match => match[2].endsWith(`(${teamId})`));
   if (identities.length !== 1) throw new Error(`Expected one valid Developer ID Application identity for team ${teamId}; found ${identities.length}.`);
   return {
-    identity: identities[0][1], keychain, continueOnError: false,
-    optionsForFile: () => ({ entitlements: resolve('assets/entitlements.plist'), hardenedRuntime: true }),
+    identity: identities[0][1], keychain, entitlements: resolve('assets/entitlements.plist'),
   };
 }
 
@@ -32,7 +31,7 @@ export async function verifySigning(environment, run = command) {
     run('xcrun', ['clang', source, '-o', executable]);
     run('codesign', [
       '--force', '--sign', signing.identity, '--keychain', signing.keychain, '--timestamp', '--options', 'runtime',
-      '--entitlements', signing.optionsForFile(executable).entitlements, executable,
+      '--entitlements', signing.entitlements, executable,
     ]);
     run('codesign', ['--verify', '--strict', '--verbose=2', executable]);
     run(executable, []);

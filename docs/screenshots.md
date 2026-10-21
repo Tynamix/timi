@@ -1,17 +1,21 @@
 # README screenshots
 
-The README uses captures of the actual Electron app with fictional projects and records. `hero.png` combines the tracking and overview captures with a presentation background; the other images show the app UI directly. All assets are committed under `docs/images/`, so the product screenshots do not rely on an external image host.
+The README shows the app interface with fictional projects and records. Existing screenshots are retained to preserve the visual reference during the Tauri migration. `hero.png` combines tracker and overview images on a presentation background; the other images show interface views. All assets live under `docs/images/`.
 
-To refresh them on a Mac with an active desktop session:
+To refresh renderer captures on macOS, where the app’s system fonts are available:
 
 ```sh
 npm ci
-npm run build
-node scripts/screenshots.mjs
+npx playwright install webkit
+npm run screenshots
 ```
 
-The script opens a separate Electron instance with a temporary data directory, English UI, light appearance, and a fixed demo clock in Europe/Berlin. It does not use your normal tracking database or modify login registration. It removes its temporary data after closing the demo instance.
+The script runs the exact HTML/CSS/TypeScript renderer in Playwright WebKit, with a temporary test-only desktop bridge backed by the real tracking core and a disposable SQLite database. The production Tauri bridge is not altered. It uses English, light appearance, a fixed clock and Europe/Berlin local time. The fixtures neither open the normal database nor change login registration. Browser and temporary data are cleaned up after capture.
 
-The captures show tracking with a daily target, the weekly overview with a weekly target, working-time settings in the shared overview/settings window, a split correction before saving, and an unresolved absence. Demo targets are eight hours Monday through Thursday, six hours Friday, and weekends off: 38 hours per week. The remaining-time and target-notification switches are enabled, but the sample work stays below both targets so it does not trigger a notification. The fixed clock and synthetic lock event are for reproducible illustrations; they do not verify physical sleep or lock behavior. See the [build and test guide](guide.md#build-and-verify) for native testing limits.
+These are renderer captures, not native Tauri window automation. They validate the interface, totals, navigation and correction dialog. They do not verify the system WKWebView version, native tray/window behavior, native IPC, notification banners, physical sleep/lock, or login registration. Follow the [native verification guide](guide.md#build-and-verify) for those checks. The old Electron Playwright driver has been removed.
 
-Visually check all six PNGs after regenerating, especially target totals, settings layout, dialog boundaries, and the composed header. Screenshot capture requires permission to launch local Electron windows in restricted automation environments.
+Captures show a 38-hour weekly target: eight hours Monday through Thursday, six on Friday, and weekends off. They include tracking, weekly overview, settings, a split correction before saving and an unresolved 18-minute absence. Sample work remains below daily and weekly targets.
+
+Visually check all six PNGs before committing them, especially totals, settings layout and dialog boundaries. To capture into a disposable review directory instead, run `TIMI_SCREENSHOT_DIRECTORY=artifacts/webkit-screenshots npm run screenshots`.
+
+Set `TIMI_SCREENSHOT_THEME=dark` with a separate output directory to review dark appearance.

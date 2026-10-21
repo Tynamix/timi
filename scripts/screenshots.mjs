@@ -1,54 +1,81 @@
-// Real Electron UI, fictional records, fixed clock, isolated disposable storage.
-// Run on a Mac desktop: npm run build && node scripts/screenshots.mjs
+// Reproducible WebKit renderer captures with real core/SQLite and a test-only desktop fixture.
+// This is not an automation driver for the native Tauri shell.
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, copyFile, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import electronPath from 'electron';
-import { _electron } from 'playwright';
+import { pathToFileURL } from 'node:url';
+import { build } from 'esbuild';
+import { webkit } from 'playwright';
+import { TrackingApplication } from '../src/core/application.ts';
+import { SqliteStore } from '../src/core/store.ts';
 
-if (process.platform !== 'darwin') throw new Error('Screenshots require a macOS desktop session.');
-const output = resolve('docs/images');
+if (process.platform !== 'darwin') throw new Error('Use macOS for screenshots with the app’s system fonts.');
+const output = resolve(process.env.TIMI_SCREENSHOT_DIRECTORY || 'docs/images');
+process.env.TZ = 'Europe/Berlin';
 const temporary = await mkdtemp(join(tmpdir(), 'timi-screenshots-'));
-const environment = { ...process.env, TZ: 'Europe/Berlin' };
-delete environment.ELECTRON_RUN_AS_NODE;
-let application;
 const at = (day, hour, minute = 0) => Date.parse(`2026-10-${day}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00+02:00`);
+let now = at(16, 13);
+const application = new TrackingApplication(new SqliteStore(join(temporary, 'tracking.sqlite')), () => now);
+let browser;
+let workspaceView = 'overview';
+const errors = [];
 try {
   await mkdir(output, { recursive: true });
-  const bootstrap = join(temporary, 'main.cjs');
-  const { version } = JSON.parse(await readFile(resolve('package.json'), 'utf8'));
-  await writeFile(bootstrap, `
-    globalThis.__screenshotTime = ${at(16, 13)};
-    Date.now = () => globalThis.__screenshotTime;
-    require('electron').powerMonitor.getSystemIdleTime = () => globalThis.__screenshotIdle || 0;
-    require('electron').app.getVersion = () => ${JSON.stringify(version)};
-    require(${JSON.stringify(resolve('dist/main.cjs'))});
-  `);
-  application = await _electron.launch({
-    executablePath: electronPath, args: [bootstrap, `--data-directory=${join(temporary, 'data')}`, '-AppleLanguages', '(en)'],
-    cwd: process.cwd(), env: environment,
+  await Promise.all(['index.html', 'style.css'].map(file => copyFile(`src/renderer/${file}`, join(temporary, file))));
+  // The production desktop bridge remains strict; only this temporary test bundle
+  // replaces it with the fixture installed below before renderer initialization.
+  await build({ entryPoints: ['src/renderer/index.ts'], outfile: join(temporary, 'renderer.js'), bundle: true,
+    platform: 'browser', target: 'safari16', plugins: [{ name: 'screenshot-desktop', setup(builder) {
+      builder.onResolve({ filter: /^\.\.\/desktop$/ }, () => ({ path: 'desktop', namespace: 'screenshot' }));
+      builder.onLoad({ filter: /.*/, namespace: 'screenshot' }, () => ({ contents: 'export async function desktopReady() {}', loader: 'js' }));
+    } }] });
+  const { version } = JSON.parse(await readFile('package.json', 'utf8'));
+  browser = await webkit.launch();
+  const context = await browser.newContext({ locale: 'en-US', timezoneId: 'Europe/Berlin', colorScheme: process.env.TIMI_SCREENSHOT_THEME === 'dark' ? 'dark' : 'light', reducedMotion: 'reduce', deviceScaleFactor: 2 });
+  context.setDefaultTimeout(15_000);
+  context.on('page', page => page.on('pageerror', error => errors.push(String(error))));
+  await context.exposeBinding('__timiFixture', async ({ page }, { method, args }) => {
+    try {
+      let value;
+      if (method === 'snapshot') value = application.getSnapshot(args[0]);
+      else if (method === 'command') {
+        value = application.execute(args[0]);
+        queueMicrotask(() => { for (const view of context.pages()) void view.evaluate(() => window.dispatchEvent(new Event('timi:changed'))); });
+      } else if (method === 'environment') value = { locale: 'en', version, loginAvailable: false, launchAtLogin: false, launchAtLoginStatus: 'not-registered', packaged: false };
+      else if (method === 'workspaceView') value = workspaceView;
+      else if (method === 'openWindow') {
+        workspaceView = args[0];
+        await page.evaluate(view => window.dispatchEvent(new CustomEvent('timi:navigate', { detail: view })), workspaceView);
+      } else throw new Error(`Unsupported screenshot fixture method: ${method}`);
+      return { ok: true, value };
+    } catch (error) { return { ok: false, error: { code: error.code || 'UNEXPECTED' } }; }
   });
-  application.context().setDefaultTimeout(15_000);
-  const entry = await application.firstWindow();
-  const errors = [];
-  application.on('window', page => page.on('pageerror', error => errors.push(String(error))));
-  entry.on('pageerror', error => errors.push(String(error)));
-  await entry.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
-  await entry.waitForSelector('#app[aria-busy="false"]');
-  const command = async value => {
-    const result = await entry.evaluate(value => window.timi.command(value), value);
-    assert.equal(result.ok, true, JSON.stringify(result));
-    return result.value;
+  await context.addInitScript(() => {
+    const call = method => (...args) => window.__timiFixture({ method, args });
+    const listen = event => callback => {
+      const handler = event => callback(event.detail);
+      window.addEventListener(event, handler);
+      return () => window.removeEventListener(event, handler);
+    };
+    window.timi = {
+      snapshot: call('snapshot'), command: call('command'), environment: call('environment'),
+      workspaceView: call('workspaceView'), openWindow: call('openWindow'),
+      closeWindow: call('closeWindow'), quit: call('quit'), setLaunchAtLogin: call('setLaunchAtLogin'),
+      onChanged: listen('timi:changed'), onError: listen('timi:error'), onFocus: listen('timi:focus'), onNavigate: listen('timi:navigate'),
+    };
+  });
+  const pageFor = async (kind, width, height) => {
+    const page = await context.newPage();
+    await page.setViewportSize({ width, height });
+    await page.goto(`${pathToFileURL(join(temporary, 'index.html'))}?window=${kind}`);
+    await page.waitForSelector('#app[aria-busy="false"]');
+    return page;
   };
-  for (const name of ['Brand design', 'Development', 'Writing']) await command({ type: 'createProject', name });
-  const snapshot = await entry.evaluate(() => window.timi.snapshot());
-  const projects = Object.fromEntries(snapshot.value.projects.map(project => [project.name, project.id]));
+  for (const name of ['Brand design', 'Development', 'Writing']) application.execute({ type: 'createProject', name });
+  const projects = Object.fromEntries(application.getSnapshot().projects.map(project => [project.name, project.id]));
   const records = [];
-  const add = (day, start, end, project) => records.push({
-    start: at(day, ...start), end: at(day, ...end),
-    kind: project ? 'work' : 'break', projectId: project ? projects[project] : null,
-  });
+  const add = (day, start, end, project) => records.push({ start: at(day, ...start), end: at(day, ...end), kind: project ? 'work' : 'break', projectId: project ? projects[project] : null });
   for (let day = 12; day <= 15; day++) {
     add(day, [9, 0], [12, day % 2 ? 0 : 30], 'Development');
     add(day, [12, day % 2 ? 0 : 30], [13, 0]);
@@ -58,77 +85,47 @@ try {
   add(16, [9, 0], [12, 0], 'Brand design');
   add(16, [12, 0], [12, 30]);
   add(16, [12, 30], [13, 0], 'Writing');
-  await command({ type: 'correct', removeIds: [], records });
-  await command({ type: 'settings', idleMinutes: 5, reminderMinutes: 10, workGoals: {
+  application.execute({ type: 'correct', removeIds: [], records });
+  application.execute({ type: 'settings', idleMinutes: 5, reminderMinutes: 10, workGoals: {
     dailyHours: [8, 8, 8, 8, 6, 0, 0], notifyDaily: true, notifyWeekly: true, showRemaining: true,
   } });
-  await command({ type: 'start', name: 'Development' });
-  // Frequent samples establish active use; one large clock jump correctly becomes idle.
+  application.execute({ type: 'start', name: 'Development' });
   for (let minutes = 0; minutes < 130; minutes += 2) {
-    await application.evaluate(() => { globalThis.__screenshotTime += 2 * 60_000; });
-    await command({ type: 'settings', idleMinutes: 5, reminderMinutes: 10 });
+    now += 2 * 60_000;
+    application.sample({ idleMs: 0, locked: false, sleeping: false });
   }
-  await application.evaluate(({ app }) => app.emit('activate'));
-  console.log('Demo state:', JSON.stringify(await entry.evaluate(async () => {
-    const { value } = await window.timi.snapshot();
-    return { mode: value.mode, todayMs: value.todayMs };
-  })));
+  const entry = await pageFor('entry', 440, 570);
   await entry.locator('.status-title').filter({ hasText: 'Development' }).waitFor();
-  await entry.locator('#project-entry').fill('');
   await entry.locator('.today-value').filter({ hasText: '5:40 / 6:00' }).waitFor();
   await entry.locator('#project-entry').blur();
   await entry.screenshot({ path: join(output, 'tracking.png') });
-  console.log('Captured tracking');
 
-  const overviewOpened = application.waitForEvent('window');
-  await entry.evaluate(() => window.timi.openWindow('overview'));
-  const overview = await overviewOpened;
-  await overview.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
-  await overview.waitForSelector('#app[aria-busy="false"]');
+  const overview = await pageFor('overview', 1120, 748);
   await overview.locator('.summary-number').filter({ hasText: '31:40 / 38:00' }).waitFor();
   await overview.screenshot({ path: join(output, 'overview.png') });
-  console.log('Captured overview');
-
-  // Settings now shares the overview window; capture the real navigation and saved goals.
   await overview.getByRole('button', { name: 'Settings', exact: true }).click();
   await overview.locator('.settings-page').waitFor({ state: 'visible' });
   assert.equal(await overview.locator('.goal-week-value').textContent(), '38:00 h');
   assert.equal(await overview.locator('#show-remaining').isChecked(), true);
-  // Use a taller real window so the sticky Save footer doesn't cover the menu-bar options.
-  const overviewSize = await application.evaluate(({ BrowserWindow }) => {
-    const window = BrowserWindow.getAllWindows().find(window => window.webContents.getURL().endsWith('window=overview'));
-    const size = window.getContentSize();
-    window.setContentSize(1120, 960);
-    return size;
-  });
+  await overview.setViewportSize({ width: 1120, height: 960 });
   await overview.locator('h1').filter({ hasText: 'Settings' }).blur();
   await overview.screenshot({ path: join(output, 'settings.png'), fullPage: true });
-  await application.evaluate(({ BrowserWindow }, size) => {
-    BrowserWindow.getAllWindows().find(window => window.webContents.getURL().endsWith('window=overview')).setContentSize(...size);
-  }, overviewSize);
+  await overview.setViewportSize({ width: 1120, height: 748 });
   await overview.getByRole('button', { name: '‹ Week overview', exact: true }).click();
   await overview.locator('.overview-page').waitFor({ state: 'visible' });
-  console.log('Captured work target settings');
-
   const row = overview.locator('.records-table tbody tr').filter({ hasText: 'Brand design' }).first();
   await row.getByRole('button', { name: 'Edit', exact: true }).click();
   await overview.getByRole('button', { name: 'Split', exact: true }).click();
   await overview.screenshot({ path: join(output, 'corrections.png') });
   await overview.getByRole('button', { name: 'Cancel', exact: true }).click();
 
-  const clarificationOpened = application.waitForEvent('window');
-  await application.evaluate(({ powerMonitor }) => {
-    powerMonitor.emit('lock-screen');
-    globalThis.__screenshotTime += 18 * 60_000;
-    globalThis.__screenshotIdle = 18 * 60;
-    powerMonitor.emit('unlock-screen');
-  });
-  const clarification = await clarificationOpened;
-  await clarification.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
+  application.sample({ idleMs: 0, locked: true, sleeping: false });
+  now += 18 * 60_000;
+  application.sample({ idleMs: 0, locked: false, sleeping: false });
+  const clarification = await pageFor('clarification', 580, 538);
   await clarification.waitForSelector('.clarification-choices');
-  await clarification.screenshot({ path: join(output, 'idle.png') });
   assert.equal(await clarification.locator('.interval-duration').textContent(), '0:18');
-  console.log('Captured corrections and absence');
+  await clarification.screenshot({ path: join(output, 'idle.png') });
 
   const embedded = async name => `data:image/png;base64,${(await readFile(join(output, name))).toString('base64')}`;
   const hero = join(temporary, 'hero.html');
@@ -142,23 +139,16 @@ try {
   <div class="window overview"><div class="bar"><i></i><i></i><i></i><span>Your week</span></div><img src="${await embedded('overview.png')}"></div>
   <div class="window entry"><img src="${await embedded('tracking.png')}"></div>
   <div class="note">Fully offline.<br>Free & open source.</div>`);
-  const canvasOpened = application.waitForEvent('window');
-  await application.evaluate(({ BrowserWindow }, path) => {
-    const window = new BrowserWindow({ width: 1600, height: 1060, useContentSize: true, show: true,
-      webPreferences: { partition: 'timi-readme-composition', sandbox: true, contextIsolation: true, nodeIntegration: false } });
-    void window.loadFile(path);
-  }, hero);
-  const canvas = await canvasOpened;
-  await canvas.waitForLoadState('load');
+  const canvas = await context.newPage();
+  await canvas.setViewportSize({ width: 1600, height: 1060 });
+  await canvas.goto(pathToFileURL(hero).href);
   await canvas.locator('header h1').waitFor();
-  await canvas.evaluate(() => Promise.all([...document.images].map(img => img.decode())));
+  await canvas.evaluate(() => Promise.all([...document.images].map(image => image.decode())));
   await canvas.screenshot({ path: join(output, 'hero.png'), fullPage: true });
   assert.deepEqual(errors, []);
-  console.log(`Saved six README images to ${output}`);
+  console.log(`Saved six WebKit renderer images to ${output}. Native Tauri window behavior is not covered.`);
 } finally {
-  if (application) {
-    try { await application.evaluate(({ app }) => { app.exit(0); }); } catch {}
-    await application.close().catch(() => {});
-  }
+  if (browser) await browser.close();
+  application.close();
   await rm(temporary, { recursive: true, force: true });
 }

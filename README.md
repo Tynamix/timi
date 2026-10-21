@@ -90,7 +90,7 @@ Adjust start and end times, change project assignments, split a period, or delet
 
 </details>
 
-<sub>Real app screenshots with fictional project names and sample records. The header image arranges two app captures on a presentation background.</sub>
+<sub>App interface screenshots with fictional project names and sample records. The header image arranges two app captures on a presentation background.</sub>
 
 ## Get started
 
@@ -130,13 +130,13 @@ To back up, quit timi and copy the whole data directory.
 
 SQLite transactions and durable checkpoints keep changes consistent. If a write fails, timi preserves the previous state and lets you retry; a failed quit leaves the app open. After a crash, recovery stops at the latest durable checkpoint. It never invents working time while the app was closed or resumes tracking on its own.
 
-The interface runs in sandboxed Electron renderers with context isolation, validated IPC, and blocked runtime network access. The platform-neutral tracking core has no Electron imports. Only macOS is currently shipped.
+The interface runs in Tauri’s isolated macOS WebKit webviews with a narrow, validated IPC interface and blocked runtime network access. The TypeScript tracking core runs separately in system JavaScriptCore and stores records through native SQLite. Only macOS is currently supported.
 
 [Data, recovery, and migration details →](docs/guide.md#data-and-recovery)
 
 ## Run from source
 
-You'll need **macOS**, **Node.js 22.14+**, and **Xcode Command Line Tools**. Dependency installation and packaging require internet access; the installed app works offline.
+You'll need **macOS**, **Node.js 22.14+**, **stable Rust** (installed with rustup), and **Xcode Command Line Tools**. Dependency installation and packaging require internet access; the installed app works offline.
 
 ```sh
 git clone https://github.com/Tynamix/timi.git
@@ -151,11 +151,12 @@ For a separate development database:
 npm start -- --data-directory=/tmp/timi-sandbox
 ```
 
-Built with **Electron · TypeScript · plain HTML/CSS · SQLite**.
+Built with **Tauri 2 · Rust · TypeScript · WebKit · plain HTML/CSS · SQLite**.
 
 ```sh
 npm run check              # Type checking, core tests, and build
-npm run test:native        # Real Electron integration checks on a Mac desktop
+npm run test:native        # Native engine/WebKit integration and Rust tests
+rustup target add aarch64-apple-darwin x86_64-apple-darwin
 npm run package:universal  # Local development DMG for Apple Silicon and Intel
 ```
 
