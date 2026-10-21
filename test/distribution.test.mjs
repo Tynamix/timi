@@ -39,11 +39,7 @@ test('release signing selects exactly one valid Developer ID identity from the e
   });
   assert.equal(options.identity, hash);
   assert.equal(options.keychain, environment.MACOS_SIGNING_KEYCHAIN);
-  assert.equal(options.continueOnError, false);
-  const perFile = options.optionsForFile('timi.app');
-  assert.equal(perFile.hardenedRuntime, true);
-  assert.deepEqual([...readFileSync(perFile.entitlements, 'utf8').matchAll(/<key>([^<]+)<\/key>/g)].map(match => match[1]), ['com.apple.security.cs.allow-jit']);
-  assert.deepEqual(options.optionsForFile('timi Helper (Renderer).app'), perFile);
+  assert.deepEqual([...readFileSync(options.entitlements, 'utf8').matchAll(/<key>([^<]+)<\/key>/g)].map(match => match[1]), ['com.apple.security.cs.allow-jit']);
   for (const output of ['', identity('B123456789'), identity() + identity(teamId, 'd'.repeat(40)), `${identity().trimEnd()} (CSSMERR_TP_CERT_EXPIRED)\n`]) {
     assert.throws(() => signingOptions(environment, () => output), /Expected one valid Developer ID Application identity/);
   }

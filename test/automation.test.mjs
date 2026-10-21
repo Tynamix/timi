@@ -10,26 +10,35 @@ import releaseConfig from '../release.config.mjs';
 
 const logger = { log() {} };
 
-test('VS Code debugging builds first, isolates data and connects the renderer over loopback', async () => {
+test('VS Code builds the Tauri app before launching LLDB with isolated data', async () => {
   const launch = JSON.parse(await readFile(new URL('../.vscode/launch.json', import.meta.url), 'utf8'));
   const tasks = JSON.parse(await readFile(new URL('../.vscode/tasks.json', import.meta.url), 'utf8'));
-  const main = launch.configurations.find(config => config.type === 'node' && config.request === 'launch');
-  const renderer = launch.configurations.find(config => config.type === 'chrome' && config.request === 'attach');
-  const build = tasks.tasks.find(task => task.label === main.preLaunchTask);
+  const native = launch.configurations.find(config => config.type === 'lldb' && config.request === 'launch');
+  const build = tasks.tasks.find(task => task.label === native.preLaunchTask);
   assert.equal(build.type, 'npm');
-  assert.equal(build.script, 'build');
-  assert.equal(main.runtimeExecutable, '${workspaceFolder}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron');
-  assert.equal(main.cwd, '${workspaceFolder}');
-  assert.equal(main.env.ELECTRON_RUN_AS_NODE, null);
-  assert.deepEqual(main.args, ['.', '--data-directory=${workspaceFolder}/.cache/vscode-debug']);
-  assert.ok(main.outFiles.includes('${workspaceFolder}/dist/**/*.cjs'));
-  assert.ok(main.runtimeArgs.includes(`--remote-debugging-port=${renderer.port}`));
-  assert.ok(main.runtimeArgs.includes(`--remote-debugging-address=${renderer.address}`));
-  assert.equal(renderer.address, '127.0.0.1');
-  assert.equal(renderer.webRoot, '${workspaceFolder}');
-  assert.equal(renderer.urlFilter, 'file://${workspaceFolder}/dist/index.html*');
-  assert.ok(renderer.timeout >= 30_000);
-  assert.ok(launch.compounds.some(compound => compound.stopAll && compound.configurations.includes(main.name) && compound.configurations.includes(renderer.name)));
+  assert.equal(build.script, 'build:native');
+  const metadata = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.equal(metadata.scripts['build:native'], 'node scripts/cargo.mjs build --manifest-path src-tauri/Cargo.toml');
+  assert.equal(tasks.tasks.find(task => build.dependsOn.includes(task.label)).script, 'build');
+  assert.equal(native.program, '${workspaceFolder}/src-tauri/target/debug/timi');
+  assert.deepEqual(native.args, ['--data-directory=${workspaceFolder}/.cache/vscode-debug']);
+});
+
+test('development uses bundled local assets and forwards application arguments through Tauri and Cargo', async () => {
+  const script = await readFile(new URL('../scripts/start.mjs', import.meta.url), 'utf8');
+  assert.match(script, /'dev', '--no-dev-server', '--no-watch', '--', '--', \.\.\.process\.argv\.slice\(2\)/);
+  const metadata = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.equal(metadata.scripts.start, 'node scripts/start.mjs');
+  assert.ok(metadata.devDependencies['@tauri-apps/cli']);
+  assert.ok(metadata.dependencies['@tauri-apps/api']);
+  assert.equal(metadata.devDependencies.electron, undefined);
+  assert.equal(metadata.devDependencies['@electron/packager'], undefined);
+});
+
+test('macOS CI verifies native Rust and JavaScriptCore and installs both release architectures', async () => {
+  const workflow = await readFile(new URL('../.github/workflows/verify-and-release.yml', import.meta.url), 'utf8');
+  assert.match(workflow, /name: Verify native Tauri and JavaScriptCore integration\n\s+if: runner\.os == 'macOS'\n\s+run: npm run test:native/);
+  assert.match(workflow, /targets: aarch64-apple-darwin,x86_64-apple-darwin/);
 });
 
 test('releases require signing and publish only the universal DMG and its final checksum', () => {

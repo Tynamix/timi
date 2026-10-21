@@ -12,3 +12,6 @@ artifacts/
 *.keychain
 *.keychain-db
 *.keychain-db-*
+dist-native/
+src-tauri/target/
+src-tauri/gen/schemas/
