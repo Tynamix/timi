@@ -41,11 +41,11 @@ test('macOS CI verifies native Rust and JavaScriptCore and installs both release
   assert.match(workflow, /targets: aarch64-apple-darwin,x86_64-apple-darwin/);
 });
 
-test('releases require signing and publish only the universal DMG and its final checksum', () => {
+test('releases publish the universal DMG, signed updater bundle, manifest and final checksums', () => {
   const [, exec] = releaseConfig.plugins.find(plugin => plugin[0] === '@semantic-release/exec');
   const [, github] = releaseConfig.plugins.find(plugin => plugin[0] === '@semantic-release/github');
-  assert.equal(exec.prepareCmd, 'npm run package:universal -- --signed && cd release && shasum -a 256 timi-mac-universal.dmg > SHA256SUMS');
-  assert.deepEqual(github.assets.map(asset => asset.path), ['release/timi-mac-universal.dmg', 'release/SHA256SUMS']);
+  assert.equal(exec.prepareCmd, 'node scripts/prepare-release.mjs');
+  assert.deepEqual(github.assets.map(asset => asset.path), ['release/timi-mac-universal.dmg', 'release/timi-mac-universal.app.tar.gz', 'release/timi-mac-universal.app.tar.gz.sig', 'release/latest.json', 'release/SHA256SUMS']);
   assert.match(github.releaseBodyTemplate, /timi-mac-universal\.dmg/);
   assert.match(github.releaseBodyTemplate, /notarized by Apple/);
   assert.doesNotMatch(github.releaseBodyTemplate, /\.zip|Open Anyway|ad-hoc/);
@@ -84,6 +84,7 @@ test('CI signing validates every secret, delegates keychain setup to the import 
     APPLE_ID: 'test@example.invalid',
     APPLE_TEAM_ID: 'A123456789',
     APPLE_APP_SPECIFIC_PASSWORD: 'test-app-password',
+    TAURI_SIGNING_PRIVATE_KEY: 'test-update-key',
   };
   for (const missing of Object.keys(secrets)) {
     const environment = { PATH: process.env.PATH, RUNNER_TEMP: directory, ...secrets };

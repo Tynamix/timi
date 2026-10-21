@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import type { AppError, DesktopAPI, Result, WorkspaceView } from './shared';
+import type { AppError, DesktopAPI, Result, UpdateStatus, WorkspaceView } from './shared';
 
 const subscriptions: Promise<unknown>[] = [];
 function subscribe<T>(event: string, callback: (value: T) => void): () => void {
@@ -13,6 +13,10 @@ function subscribe<T>(event: string, callback: (value: T) => void): () => void {
 }
 const call = <T>(action: string, value: unknown = null): Promise<Result<T>> => invoke('desktop', { action, value });
 const api: DesktopAPI = {
+  updateStatus: () => call('update-status'),
+  checkUpdate: () => call('update-check'),
+  installUpdate: () => call('update-install'),
+  onUpdate: callback => subscribe<UpdateStatus>('timi:update', callback),
   snapshot: (offset = 0) => call('snapshot', offset),
   command: command => call('command', command),
   environment: () => call('environment'),

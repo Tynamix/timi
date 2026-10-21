@@ -2,9 +2,10 @@ import { desktopReady } from '../desktop';
 import { correctionLocalTimes, localMinuteInput } from './time-input';
 import { parseWorkHours } from './work-hours';
 import { dailyTargetMs, hoursMs, weeklyTargetMs } from '../core/work-goals';
-import type { AppError, Command, Environment, Locale, Project, RecordInput, Result, Snapshot, TimeRecord, WindowKind, WorkspaceView } from '../shared';
+import type { AppError, Command, Environment, Locale, Project, RecordInput, Result, Snapshot, TimeRecord, UpdateStatus, WindowKind, WorkspaceView } from '../shared';
 
 const en = {
+  updates: 'App updates', updateHelp: 'Checks GitHub at startup and every six hours. Your time records stay on this Mac. Installation restarts timi with tracking stopped.', updateCheck: 'Check for updates', updateInstall: 'Update and restart', updateRestart: 'Retry restart', updateAvailable: 'Version {version} is available', updateIdle: 'No update check yet.', updateCurrent: 'You are up to date.', updateChecking: 'Checking for updates…', updateDownloading: 'Downloading and verifying update…', updateInstalling: 'Saving time records and installing…', updateDisabled: 'Updates are available in release builds.', updateError: 'The update could not be completed. Check your internet connection and that timi is installed in Applications, then retry. Tracking remains available.', updateRestartError: 'The update is installed. timi stays open until your time records can be saved. Retry the restart.',
   menuBarDisplay: 'Menu bar', showRemaining: 'Show remaining working time', showRemainingHelp: 'Off: worked time. On: time left until your daily target.', showRemainingFallback: 'Without a daily target, worked time is shown. Overtime appears with a minus sign.',
   workGoals: 'Working time targets', workGoalsIntro: 'Your regular hours, day by day.', workGoalsHelp: '0 = day off · Decimal hours: 7.6 h = 7 h 36 min', hours: 'hours', weeklyTarget: 'Weekly target', goalDays: '{days} working days · Mon–Sun', dayOff: 'Day off', goalReminders: 'Notifications', dailyGoalToggle: 'Daily target reached', weeklyGoalToggle: 'Weekly target reached', dailyGoalHelp: 'One notification per day', weeklyGoalHelp: 'One notification per week', goalNotificationSummary: 'About notifications', goalNotificationHelp: 'Breaks and unresolved time are excluded. Notifications do not repeat after restarting timi. Allow notifications for timi in System Settings → Notifications.', invalidWorkHours: 'Enter 0 to 24 hours for each weekday, for example 7.6 or 7,6.', target: 'Target',
   loading: 'Opening timi…', today: 'WORKED TODAY', untracked: 'Ready when you are', untrackedDetail: 'Choose a project to start working.', working: 'Working', manualBreak: 'On a break', breakDetail: 'Your break continues until you choose.', pending: 'Time needs clarification', pendingDetail: 'Resolve the open question before continuing.',
@@ -19,6 +20,7 @@ const en = {
   errorStorage: 'timi could not save or read its data. Your previous state has been preserved. Check free disk space and folder access, then try again.', errorStorageVersion: 'This data was created by a newer timi version. It has not been replaced.', errorStorageInvalid: 'The saved data cannot be read safely. It has not been replaced.', errorCommand: 'This action is not valid right now.', errorProjectExists: 'A project with that name already exists. Choose a different name.', errorInvalidProject: 'Enter or select a valid project.', errorProjectMissing: 'That project could not be found. Refresh and try again.', errorPending: 'Resolve the pending time question before starting work or a break.', errorOverlap: 'This period overlaps saved or ongoing work or a break. Adjust its boundaries; no records were changed.', errorRecordMissing: 'That record no longer exists. Close this editor and try again.', errorClock: 'The system clock moved backwards or is invalid. Check the date and time and try again.', errorGeneric: 'The action could not be completed. Please try again.', errorActivity: 'macOS inactivity could not be read. Please try again; timi has kept the previous state.', errorLogin: 'The macOS login setting could not be updated. Check System Settings → General → Login Items.', errorConflictTime: 'Conflicting interval: {start} – {end}.', errorDetailsProject: 'Project: {project}.', dismissError: 'Dismiss message', close: 'Close', refresh: 'Refresh', noProject: 'No project',
 } as const;
 const de: Record<keyof typeof en, string> = {
+  updates: 'App-Updates', updateHelp: 'Prüft GitHub beim Start und alle sechs Stunden. Deine Zeitdaten bleiben auf diesem Mac. Die Installation startet timi mit gestoppter Erfassung neu.', updateCheck: 'Nach Updates suchen', updateInstall: 'Aktualisieren und neu starten', updateRestart: 'Neustart erneut versuchen', updateAvailable: 'Version {version} ist verfügbar', updateIdle: 'Noch nicht nach Updates gesucht.', updateCurrent: 'Du bist auf dem neuesten Stand.', updateChecking: 'Updates werden gesucht…', updateDownloading: 'Update wird geladen und geprüft…', updateInstalling: 'Zeitdaten werden gespeichert, Update wird installiert…', updateDisabled: 'Updates sind in Release-Versionen verfügbar.', updateError: 'Das Update konnte nicht abgeschlossen werden. Prüfe deine Internetverbindung und ob timi unter Programme installiert ist. Versuche es dann erneut. Die Zeiterfassung bleibt verfügbar.', updateRestartError: 'Das Update ist installiert. timi bleibt geöffnet, bis deine Zeitdaten gespeichert werden können. Versuche den Neustart erneut.',
   menuBarDisplay: 'Menüleiste', showRemaining: 'Restarbeitszeit anzeigen', showRemainingHelp: 'Aus: gearbeitete Zeit. Ein: verbleibende Zeit bis zum Tagesziel.', showRemainingFallback: 'Ohne Tagesziel wird die gearbeitete Zeit angezeigt. Überstunden erscheinen mit Minuszeichen.',
   workGoals: 'Arbeitszeitziele', workGoalsIntro: 'Deine reguläre Arbeitszeit pro Tag.', workGoalsHelp: '0 = frei · Dezimalstunden: 7,6 h = 7 Std. 36 Min.', hours: 'Stunden', weeklyTarget: 'Wochenziel', goalDays: '{days} Arbeitstage · Mo–So', dayOff: 'Frei', goalReminders: 'Benachrichtigungen', dailyGoalToggle: 'Tagesziel erreicht', weeklyGoalToggle: 'Wochenziel erreicht', dailyGoalHelp: 'Eine Mitteilung pro Tag', weeklyGoalHelp: 'Eine Mitteilung pro Woche', goalNotificationSummary: 'Hinweise zu Mitteilungen', goalNotificationHelp: 'Pausen und ungeklärte Zeit zählen nicht mit. Mitteilungen wiederholen sich auch nach einem Neustart von timi nicht. Erlaube Mitteilungen für timi unter Systemeinstellungen → Mitteilungen.', invalidWorkHours: 'Gib für jeden Wochentag 0 bis 24 Stunden ein, zum Beispiel 7,6 oder 7.6.', target: 'Ziel',
   loading: 'timi wird geöffnet…', today: 'HEUTE GEARBEITET', untracked: 'Bereit, wenn du es bist', untrackedDetail: 'Wähle ein Projekt und starte.', working: 'Arbeit', manualBreak: 'In einer Pause', breakDetail: 'Die Pause läuft bis zu deiner Entscheidung.', pending: 'Zeit wartet auf Klärung', pendingDetail: 'Kläre zuerst die offene Zeitspanne.',
@@ -52,7 +54,40 @@ const app = document.querySelector<HTMLElement>('#app')!;
 const errors = document.createElement('div');
 errors.setAttribute('role', 'alert');
 const content = document.createElement('div');
-app.append(errors, content);
+const updateNotice = document.createElement('div');
+updateNotice.setAttribute('aria-live', 'polite');
+app.append(errors, updateNotice, content);
+let updateStatus: UpdateStatus = { phase: 'disabled', version: null, error: null };
+let updateSection: HTMLElement | undefined;
+
+async function updateAction(install: boolean): Promise<void> {
+  const result = await safe(install ? window.timi.installUpdate() : window.timi.checkUpdate());
+  // Native events own the status: an async result may already have advanced
+  // beyond the command response by the time that response reaches this window.
+  if (!result.ok) showError(result.error);
+}
+function renderUpdates(status: UpdateStatus): void {
+  updateStatus = status;
+  const busy = ['checking', 'downloading', 'installing'].includes(status.phase);
+  const canInstall = !!status.version && !busy;
+  const message = status.phase === 'restart' ? t('updateRestartError')
+    : status.error ? (status.error.code === 'UPDATE_ERROR' ? t('updateError') : errorText(status.error))
+    : t(({ idle: 'updateIdle', disabled: 'updateDisabled', checking: 'updateChecking', downloading: 'updateDownloading', installing: 'updateInstalling', current: 'updateCurrent', available: 'updateAvailable' } as Partial<Record<UpdateStatus['phase'], TextKey>>)[status.phase] ?? 'updateHelp', { version: status.version ?? '' });
+  updateNotice.replaceChildren();
+  if (kind !== 'clarification' && status.version) {
+    const banner = el('div', 'update-banner row');
+    banner.append(el('span', 'grow', message));
+    if (canInstall) banner.append(button(t(status.phase === 'restart' ? 'updateRestart' : 'updateInstall'), () => updateAction(true), 'primary'));
+    updateNotice.append(banner);
+  }
+  if (updateSection) {
+    const text = el('p', 'field-help', message); text.setAttribute('role', 'status');
+    const check = button(t('updateCheck'), () => updateAction(false)); check.disabled = busy || status.phase === 'disabled' || status.phase === 'restart';
+    const actions = el('div', 'button-row'); actions.append(check);
+    if (canInstall) actions.append(button(t(status.phase === 'restart' ? 'updateRestart' : 'updateInstall'), () => updateAction(true), 'primary'));
+    updateSection.replaceChildren(el('h2', 'settings-section-title', t('updates')), el('p', 'field-help', t('updateHelp')), text, actions);
+  }
+}
 
 function t(key: TextKey, values: Record<string, string | number> = {}): string {
   let value: string = (locale === 'de' ? de : en)[key];
@@ -388,7 +423,8 @@ function buildSettings(): void {
   append(info, el('p', 'privacy-note', t('privacy')), el('p', 'privacy-note', t('version', { version: env.version })), saved);
   const save = markAction(button(t('saveSettings'), () => undefined, 'primary')); save.type = 'submit'; append(footer, info, save);
   const schedule = el('div', 'settings-side'); append(schedule, goals);
-  const preferencesSide = el('div', 'settings-side'); append(preferencesSide, timing, preferences, loginSection);
+  updateSection = el('section', 'card settings-section update-section'); renderUpdates(updateStatus);
+  const preferencesSide = el('div', 'settings-side'); append(preferencesSide, updateSection, timing, preferences, loginSection);
   append(form, schedule, preferencesSide, footer);
   function positiveMinutes(value: string): number | null { const input = value.trim(); if (!/^\d+$/.test(input)) return null; const number = Number(input); return number > 0 && Number.isSafeInteger(number) && Number.isSafeInteger(number * 60_000) ? number : null; }
   form.addEventListener('submit', event => {
@@ -528,7 +564,9 @@ async function initialize(): Promise<void> {
   } else buildClarification();
   update(); if (kind === 'entry') entryInput.focus();
   window.timi.onChanged(() => { void refresh(); }); window.timi.onError(showError); window.timi.onFocus(() => { if (kind === 'entry') entryInput.focus(); if (kind === 'overview' && workspaceView === 'settings') void refreshEnvironment(); void refresh(); });
+  window.timi.onUpdate(renderUpdates);
   await desktopReady();
+  const updates = await safe(window.timi.updateStatus()); if (updates.ok) renderUpdates(updates.value);
   setInterval(() => { if (!document.hidden && !busy) void refresh(); }, 1000);
 }
 if (kind === 'overview') window.timi.onNavigate(showWorkspaceView);

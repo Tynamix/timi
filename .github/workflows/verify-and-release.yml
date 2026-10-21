@@ -69,6 +69,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
           set -euo pipefail
           : "${MACOS_CERTIFICATE_P12_BASE64:?Missing MACOS_CERTIFICATE_P12_BASE64 secret}"
@@ -76,6 +77,7 @@ jobs:
           : "${APPLE_ID:?Missing APPLE_ID secret}"
           : "${APPLE_TEAM_ID:?Missing APPLE_TEAM_ID secret}"
           : "${APPLE_APP_SPECIFIC_PASSWORD:?Missing APPLE_APP_SPECIFIC_PASSWORD secret}"
+          : "${TAURI_SIGNING_PRIVATE_KEY:?Missing TAURI_SIGNING_PRIVATE_KEY secret}"
           umask 077
           certificate="$RUNNER_TEMP/timi-signing.p12"
           keychain_password="$(openssl rand -base64 32)"
@@ -110,6 +112,8 @@ jobs:
         run: npm run release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           MACOS_SIGNING_KEYCHAIN: ${{ runner.temp }}/timi-signing.keychain
       - name: Remove signing files
