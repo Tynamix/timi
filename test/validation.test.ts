@@ -13,6 +13,7 @@ test('the IPC boundary accepts only documented command shapes', () => {
     { type: 'renameProject', id: 'project', name: 'New name' },
     { type: 'archiveProject', id: 'project', archived: true },
     { type: 'adjustStart', start: 1_000, expectedStart: 2_000, projectId: 'project', overwriteIds: ['record'] },
+    { type: 'correct', removeIds: [], records: [], overwriteIds: ['record'], overwriteActive: { kind: 'work', start: 1_000, projectId: 'project' } },
     { type: 'correct', removeIds: ['record'], records: [
       { start: 1_000, end: 2_000, kind: 'work', projectId: 'project' },
       { start: 2_000, end: 3_000, kind: 'break', projectId: null },
@@ -41,6 +42,11 @@ test('the IPC boundary rejects unknown commands, fields, dangerous payloads and 
     { type: 'adjustStart', start: 1_000, expectedStart: 2_000, projectId: 'project', overwriteIds: [], extra: true },
     { type: 'correct', removeIds: 'record', records: [] },
     { type: 'correct', removeIds: [null], records: [] },
+    { type: 'correct', removeIds: [], records: [], overwriteIds: [true] },
+    { type: 'correct', removeIds: [], records: [], overwriteActive: { kind: 'work', start: 1, projectId: 'project' } },
+    { type: 'correct', removeIds: [], records: [], overwriteIds: [], overwriteActive: { kind: 'break', start: 1, projectId: null } },
+    { type: 'correct', removeIds: [], records: [], overwriteIds: [], overwriteActive: { kind: 'work', start: NaN, projectId: 'project' } },
+    { type: 'correct', removeIds: [], records: [], overwriteIds: [], overwriteActive: { kind: 'work', start: 1, projectId: 'project', end: 3 } },
     { type: 'correct', removeIds: [], records: [
       { start: NaN, end: 2_000, kind: 'work', projectId: 'project' },
     ] },

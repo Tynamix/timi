@@ -23,8 +23,12 @@ export function isCommand(v: unknown): v is Command {
     case 'adjustStart': return keys(v, ['type', 'start', 'expectedStart', 'projectId', 'overwriteIds'])
       && integer(v.start) && integer(v.expectedStart) && text(v.projectId) && Array.isArray(v.overwriteIds)
       && v.overwriteIds.length <= 10_000 && v.overwriteIds.every(text);
-    case 'correct': return keys(v, ['type', 'removeIds', 'records']) && Array.isArray(v.removeIds) && Array.isArray(v.records)
-      && v.removeIds.length <= 10_000 && v.records.length <= 10_000 && v.removeIds.every(text) && v.records.every(record);
+    case 'correct': return keys(v, ['type', 'removeIds', 'records', 'overwriteIds', 'overwriteActive']) && Array.isArray(v.removeIds) && Array.isArray(v.records)
+      && v.removeIds.length <= 10_000 && v.records.length <= 10_000 && v.removeIds.every(text) && v.records.every(record)
+      && (v.overwriteIds === undefined || (Array.isArray(v.overwriteIds) && v.overwriteIds.length <= 10_000 && v.overwriteIds.every(text)))
+      && (v.overwriteActive === undefined || (v.overwriteIds !== undefined && object(v.overwriteActive)
+        && keys(v.overwriteActive, ['start', 'kind', 'projectId']) && integer(v.overwriteActive.start)
+        && v.overwriteActive.kind === 'work' && text(v.overwriteActive.projectId)));
     default: return false;
   }
 }

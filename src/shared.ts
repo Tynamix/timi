@@ -37,7 +37,7 @@ export type Command =
   | { type: 'renameProject'; id: string; name: string }
   | { type: 'archiveProject'; id: string; archived: boolean }
   | { type: 'adjustStart'; start: number; expectedStart: number; projectId: string; overwriteIds: string[] }
-  | { type: 'correct'; removeIds: string[]; records: RecordInput[] };
+  | { type: 'correct'; removeIds: string[]; records: RecordInput[]; overwriteIds?: string[]; overwriteActive?: ActivePeriod };
 export interface NativeSample { idleMs: number; locked: boolean; sleeping: boolean }
 export interface AppError { code: string; details?: Record<string, string | number> }
 export type Result<T> = { ok: true; value: T } | { ok: false; error: AppError };

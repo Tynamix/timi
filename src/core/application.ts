@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { ActivePeriod, Command, NativeSample, PendingPeriod, Project, RecordInput, Snapshot, TimeRecord, WorkGoalNotice } from '../shared.js';
 import { reachedWorkGoals, validWorkGoals } from './work-goals.js';
 import { accounting } from './accounting.js';
+import { needsOverwrite, overlapRange, remainingRanges } from './corrections.js';
 import { AppFailure } from './errors.js';
 import { freshRuntime, projectKey, projectName, validMinutes, validTimestamp, type PersistedState, type RuntimeState } from './model.js';
 import { SqliteStore } from './store.js';
@@ -127,7 +128,7 @@ export class TrackingApplication {
           this.projectById(draft, command.id).archived = command.archived;
           return;
         case 'correct':
-          this.correct(draft, command.removeIds, command.records, now);
+          this.correct(draft, command, now);
           return;
         case 'adjustStart':
           this.adjustStart(draft, command, now);
@@ -388,7 +389,8 @@ export class TrackingApplication {
     draft.records.push({ id: randomUUID(), start, end, kind, projectId, source });
   }
 
-  private correct(draft: State, removeIds: string[], inputs: RecordInput[], now: number): void {
+  private correct(draft: State, command: Extract<Command, { type: 'correct' }>, now: number): void {
+    const { removeIds, records: inputs } = command;
     if (!Array.isArray(removeIds) || !Array.isArray(inputs) || removeIds.some(id => typeof id !== 'string') || new Set(removeIds).size !== removeIds.length) throw new AppFailure('INVALID_COMMAND');
     for (const id of removeIds) if (!draft.records.some(record => record.id === id)) throw new AppFailure('RECORD_NOT_FOUND');
     draft.records = draft.records.filter(record => !removeIds.includes(record.id));
@@ -398,11 +400,41 @@ export class TrackingApplication {
         if (typeof input.projectId !== 'string') throw new AppFailure('INVALID_PROJECT');
         this.projectById(draft, input.projectId);
       } else if (input.kind !== 'break' || input.projectId !== null) throw new AppFailure('INVALID_PROJECT');
-      this.assertNoConflict(draft, input);
-      this.appendRecord(draft, input.start, input.end, input.kind, input.projectId, 'manual');
     }
     // A backward wall clock must not let a current interval disappear from overlap checks.
     if (draft.runtime.active && now < draft.runtime.active.start) throw new AppFailure('CLOCK_INVALID');
+    if (command.overwriteIds !== undefined) this.replaceOverlaps(draft, inputs, command.overwriteIds, command.overwriteActive, now);
+    else if (command.overwriteActive !== undefined) throw new AppFailure('INVALID_COMMAND');
+    for (const input of inputs) {
+      this.assertNoConflict(draft, input);
+      this.appendRecord(draft, input.start, input.end, input.kind, input.projectId, 'manual');
+    }
+  }
+
+  private replaceOverlaps(draft: State, inputs: RecordInput[], overwriteIds: string[], overwriteActive: ActivePeriod | undefined, now: number): void {
+    if (!Array.isArray(overwriteIds) || overwriteIds.some(id => typeof id !== 'string') || new Set(overwriteIds).size !== overwriteIds.length) throw new AppFailure('INVALID_COMMAND');
+    const otherWork = draft.records.filter(record => inputs.some(input => needsOverwrite(record, input)));
+    if (otherWork.some(record => !overwriteIds.includes(record.id))) throw new AppFailure('OVERWRITE_REQUIRED');
+    if (overwriteIds.some(id => !otherWork.some(record => record.id === id))) throw new AppFailure('ACTIVE_CHANGED');
+    const active = draft.runtime.active;
+    const activeInput = active ? { ...active, end: Infinity } : null;
+    const activeChanges = activeInput ? inputs.filter(input => overlapRange(activeInput, input)) : [];
+    const needsActiveApproval = activeInput && activeChanges.some(input => needsOverwrite(activeInput, input));
+    if (needsActiveApproval && !overwriteActive) throw new AppFailure('OVERWRITE_REQUIRED');
+    if (overwriteActive && (!needsActiveApproval || !active || overwriteActive.start !== active.start
+      || overwriteActive.kind !== active.kind || overwriteActive.projectId !== active.projectId)) throw new AppFailure('ACTIVE_CHANGED');
+    // Ongoing recording can only be replaced through now, never into its future.
+    if (activeChanges.some(input => input.end > now)) throw new AppFailure('INVALID_RANGE');
+    draft.records = draft.records.flatMap(record => {
+      if (!inputs.some(input => overlapRange(record, input))) return [record];
+      return remainingRanges(record.start, record.end, inputs).map(range => ({ ...record, ...range, id: randomUUID() }));
+    });
+    if (active && activeChanges.length) {
+      const end = Math.max(...activeChanges.map(input => input.end));
+      for (const range of remainingRanges(active.start, end, inputs)) this.appendRecord(draft, range.start, range.end, active.kind, active.projectId, 'tracked');
+      draft.runtime.active = { ...active, start: end };
+      // Keep native activity anchors intact so the next idle check still covers the whole unresolved tail.
+    }
   }
 
   private adjustStart(draft: State, command: Extract<Command, { type: 'adjustStart' }>, now: number): void {

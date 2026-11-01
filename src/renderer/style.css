@@ -54,3 +54,4 @@ body:has(.entry-page) #app{min-height:100vh;display:flex;flex-direction:column}b
 .start-editor-dialog .editor{padding:18px}.start-editor-dialog .editor-header{margin-bottom:12px}.start-editor-dialog .editor-header h2{font-size:16px}
 .start-editor-dialog .field{margin-bottom:10px}.start-editor-dialog .delete-confirm p{margin-top:7px}
 .start-editor-actions{justify-content:flex-end;margin-top:16px}.overwrite-records{padding-left:18px;line-height:1.6;font-size:11px}
+fieldset.editor-segments{border:0;margin:0;min-width:0}
