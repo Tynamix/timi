@@ -96,6 +96,64 @@ test('CI signing validates every secret, delegates keychain setup to the import 
   }
 });
 
+test('CI imports the G2 intermediate only when absent and stops before notarization on errors', async () => {
+  const workflow = await readFile(new URL('../.github/workflows/verify-and-release.yml', import.meta.url), 'utf8');
+  const script = [...workflow.matchAll(/        run: \|\n((?:          .*(?:\n|$))+)/g)]
+    .map(match => match[1].replace(/^          /gm, ''))
+    .find(script => script.includes('DeveloperIDG2CA.cer'));
+  const fingerprint = 'AB'.repeat(32);
+  // Run the actual workflow shell with fake external tools; no keychain or Apple service is touched.
+  const tools = `
+    curl() { return "$FETCH_STATUS"; }
+    openssl() {
+      printf 'sha256 Fingerprint=%s\\n' '${fingerprint.match(/../g).join(':')}';
+      return "$FINGERPRINT_STATUS";
+    }
+    security() {
+      case "$1" in
+        find-certificate)
+          [[ "$2" == '-a' && "$3" == '-Z' && "$4" == "$MACOS_SIGNING_KEYCHAIN" ]] || return 90
+          printf 'SHA-256 hash: %s\\n' "$EXISTING_FINGERPRINT"
+          return "$LOOKUP_STATUS"
+          ;;
+        import)
+          [[ "$2" == "$RUNNER_TEMP/timi-developer-id-g2.cer" && "$3" == '-k' && "$4" == "$MACOS_SIGNING_KEYCHAIN" ]] || return 91
+          echo import-attempted
+          return "$IMPORT_STATUS"
+          ;;
+        *) return 92 ;;
+      esac
+    }
+    node() { echo signing-checked; }
+    xcrun() { echo notarization-prepared; }
+  `;
+  for (const scenario of [
+    { name: 'identical certificate exists', existing: fingerprint, imported: false, status: 0 },
+    { name: 'certificate missing', existing: '', imported: true, status: 0 },
+    { name: 'different certificate exists', existing: 'CD'.repeat(32), imported: true, status: 0 },
+    { name: 'import fails', imported: true, importStatus: 1, status: 1 },
+    { name: 'keychain lookup fails', lookupStatus: 1, imported: false, status: 1 },
+    { name: 'certificate download fails', fetchStatus: 22, imported: false, status: 22 },
+    { name: 'certificate cannot be parsed', fingerprintStatus: 1, imported: false, status: 1 },
+  ]) {
+    const result = spawnSync('bash', ['-c', `${tools}\n${script}`], {
+      env: {
+        PATH: process.env.PATH,
+        RUNNER_TEMP: '/tmp/timi signing test', MACOS_SIGNING_KEYCHAIN: '/tmp/timi signing test/timi-signing.keychain',
+        APPLE_ID: 'test@example.invalid', APPLE_TEAM_ID: 'A123456789', APPLE_APP_SPECIFIC_PASSWORD: 'test-password',
+        EXISTING_FINGERPRINT: scenario.existing ?? '', IMPORT_STATUS: String(scenario.importStatus ?? 0),
+        LOOKUP_STATUS: String(scenario.lookupStatus ?? 0), FETCH_STATUS: String(scenario.fetchStatus ?? 0),
+        FINGERPRINT_STATUS: String(scenario.fingerprintStatus ?? 0),
+      },
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, scenario.status, `${scenario.name}: ${result.stderr}`);
+    assert.equal(result.stdout.includes('import-attempted'), scenario.imported, scenario.name);
+    assert.equal(result.stdout.includes('signing-checked'), scenario.status === 0, scenario.name);
+    assert.equal(result.stdout.includes('notarization-prepared'), scenario.status === 0, scenario.name);
+  }
+});
+
 test('the configured release analyzer handles patch, feature, breaking and non-release commits', async () => {
   const [, config] = releaseConfig.plugins.find(plugin => plugin[0] === '@semantic-release/commit-analyzer');
   for (const [message, expected] of [
