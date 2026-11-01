@@ -104,7 +104,14 @@ jobs:
           intermediate="$RUNNER_TEMP/timi-developer-id-g2.cer"
           curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
             https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer --output "$intermediate"
-          security import "$intermediate" -k "$keychain"
+          # The imported PKCS12 may already include this intermediate certificate.
+          fingerprint="$(openssl x509 -inform DER -in "$intermediate" -noout -fingerprint -sha256 | cut -d= -f2 | tr -d ':')"
+          certificates="$(security find-certificate -a -Z "$keychain")"
+          if grep -Fx "SHA-256 hash: $fingerprint" <<< "$certificates" > /dev/null; then
+            echo "Developer ID G2 intermediate already present."
+          else
+            security import "$intermediate" -k "$keychain"
+          fi
           node scripts/signing-check.mjs
           xcrun notarytool store-credentials timi-notarization --keychain "$keychain" \
             --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD"
