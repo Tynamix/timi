@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { ActivePeriod, Command, NativeSample, PendingPeriod, Project, RecordInput, Snapshot, TimeRecord, WorkGoalNotice } from '../shared.js';
 import { reachedWorkGoals, validWorkGoals } from './work-goals.js';
 import { accounting } from './accounting.js';
+import { needsOverwrite, overlapRange, remainingRanges } from './corrections.js';
 import { AppFailure } from './errors.js';
 import { freshRuntime, projectKey, projectName, validMinutes, validTimestamp, type PersistedState, type RuntimeState } from './model.js';
 import { SqliteStore } from './store.js';
@@ -31,17 +32,21 @@ export class TrackingApplication {
       }
       if (!previous.cleanExit && previous.active) {
         const active = previous.active;
-        const end = Math.max(active.start, previous.checkpointAt);
-        let start = active.start;
-        if (active.kind === 'work') {
-          const certainEnd = Math.max(active.start, Math.min(end, previous.lastActivity));
-          this.appendRecord(next, active.start, certainEnd, 'work', active.projectId, 'tracked');
-          start = certainEnd;
-        }
-        if (end > start) {
-          const recovery: PendingPeriod = { id: randomUUID(), start, end, projectId: active.projectId, reason: 'recovery', resume: false };
-          if (!runtime.pending) runtime.pending = recovery;
-          else runtime.pendingQueue.push(recovery);
+        const fragments = this.unconfirmedWork(next, active, previous.lastActivity);
+        const fragmentIds = new Set(fragments.map(record => record.id));
+        next.records = next.records.filter(record => !fragmentIds.has(record.id));
+        for (const period of [...fragments, { ...active, end: Math.max(active.start, previous.checkpointAt) }]) {
+          let start = period.start;
+          if (period.kind === 'work') {
+            const certainEnd = Math.max(start, Math.min(period.end, previous.lastActivity));
+            this.appendRecord(next, start, certainEnd, 'work', period.projectId, 'tracked');
+            start = certainEnd;
+          }
+          if (period.end > start) {
+            const recovery: PendingPeriod = { id: randomUUID(), start, end: period.end, projectId: period.projectId, reason: 'recovery', resume: false };
+            if (!runtime.pending) runtime.pending = recovery;
+            else runtime.pendingQueue.push(recovery);
+          }
         }
       }
     }
@@ -127,7 +132,10 @@ export class TrackingApplication {
           this.projectById(draft, command.id).archived = command.archived;
           return;
         case 'correct':
-          this.correct(draft, command.removeIds, command.records, now);
+          this.correct(draft, command, now);
+          return;
+        case 'adjustStart':
+          this.adjustStart(draft, command, now);
           return;
         default:
           throw new AppFailure('INVALID_COMMAND');
@@ -236,7 +244,7 @@ export class TrackingApplication {
     // If the timer missed the threshold itself, a returning input still reveals the completed
     // inactivity streak. Classify it before advancing the last-activity anchor.
     if (hadNewActivity && runtime.active?.kind === 'work'
-      && lastActivity - Math.max(runtime.active.start, previousActivity) >= threshold) {
+      && lastActivity - this.idleStart(draft) >= threshold) {
       this.detectIdle(draft, lastActivity, false);
     }
     const gapWasInactive = hadNewActivity && lastActivity - Math.max(previousActivity, runtime.reminderAnchor) >= threshold;
@@ -268,17 +276,45 @@ export class TrackingApplication {
   private detectIdle(draft: State, now: number, absenceBegan: boolean): void {
     const runtime = draft.runtime;
     if (runtime.active?.kind !== 'work' || runtime.pending) return;
-    const idleStart = Math.max(runtime.active.start, runtime.lastActivity);
+    const fragments = this.unconfirmedWork(draft, runtime.active, runtime.lastActivity);
+    const idleStart = this.idleStart(draft);
     const thresholdReached = now - idleStart >= draft.settings.idleMinutes * 60_000;
     if (!thresholdReached && !absenceBegan && !runtime.locked && !runtime.sleeping) return;
     const start = thresholdReached ? idleStart : now;
     const projectId = runtime.active.projectId;
+    const pending: PendingPeriod[] = [];
+    if (thresholdReached) {
+      const fragmentIds = new Set(fragments.map(record => record.id));
+      draft.records = draft.records.filter(record => !fragmentIds.has(record.id));
+      for (const fragment of fragments) {
+        this.appendRecord(draft, fragment.start, Math.min(fragment.end, start), 'work', projectId, 'tracked');
+        pending.push({ id: randomUUID(), start: Math.max(fragment.start, start), end: fragment.end, projectId, reason: 'idle', resume: false });
+      }
+    }
     this.appendRecord(draft, runtime.active.start, start, 'work', projectId, 'tracked');
+    pending.push({ id: randomUUID(), start: Math.max(runtime.active.start, start), end: null, projectId, reason: 'idle', resume: true });
     runtime.active = null;
-    runtime.pending = { id: randomUUID(), start, end: null, projectId, reason: 'idle', resume: true };
+    runtime.pending = pending.shift()!;
+    runtime.pendingQueue.push(...pending);
     runtime.resumeProjectId = null;
     runtime.awaitingReturn = thresholdReached && !absenceBegan;
     runtime.reminderDue = false;
+  }
+
+  /** Only splitting an active interval can leave tracked work after its last activity anchor.
+   * Manual corrections are explicit decisions; untouched tracked fragments remain reversible
+   * until native input confirms them, the idle threshold classifies them, or the app recovers. */
+  private unconfirmedWork(draft: PersistedState, active: ActivePeriod, lastActivity: number): TimeRecord[] {
+    if (active.kind !== 'work' || lastActivity >= active.start) return [];
+    return draft.records.filter(record => record.kind === 'work' && record.source === 'tracked'
+      && record.projectId === active.projectId && record.end > lastActivity && record.end <= active.start && record.end > record.start)
+      .sort((a, b) => a.start - b.start);
+  }
+
+  private idleStart(draft: State): number {
+    const { active, lastActivity } = draft.runtime;
+    const earliest = this.unconfirmedWork(draft, active!, lastActivity)[0]?.start ?? active!.start;
+    return Math.max(earliest, lastActivity);
   }
 
   private updateReminderDue(draft: State): void {
@@ -336,10 +372,11 @@ export class TrackingApplication {
 
   private stop(draft: State, now: number): void {
     this.finishActive(draft, now);
-    if (draft.runtime.pending) {
-      if (now < draft.runtime.pending.start) throw new AppFailure('CLOCK_INVALID');
-      draft.runtime.pending.end ??= now;
-      draft.runtime.pending.resume = false;
+    for (const pending of [draft.runtime.pending, ...draft.runtime.pendingQueue]) {
+      if (!pending) continue;
+      if (now < pending.start) throw new AppFailure('CLOCK_INVALID');
+      pending.end ??= now;
+      pending.resume = false;
     }
     draft.runtime.resumeProjectId = null;
     this.resetReminder(draft.runtime, now);
@@ -385,7 +422,8 @@ export class TrackingApplication {
     draft.records.push({ id: randomUUID(), start, end, kind, projectId, source });
   }
 
-  private correct(draft: State, removeIds: string[], inputs: RecordInput[], now: number): void {
+  private correct(draft: State, command: Extract<Command, { type: 'correct' }>, now: number): void {
+    const { removeIds, records: inputs } = command;
     if (!Array.isArray(removeIds) || !Array.isArray(inputs) || removeIds.some(id => typeof id !== 'string') || new Set(removeIds).size !== removeIds.length) throw new AppFailure('INVALID_COMMAND');
     for (const id of removeIds) if (!draft.records.some(record => record.id === id)) throw new AppFailure('RECORD_NOT_FOUND');
     draft.records = draft.records.filter(record => !removeIds.includes(record.id));
@@ -395,11 +433,67 @@ export class TrackingApplication {
         if (typeof input.projectId !== 'string') throw new AppFailure('INVALID_PROJECT');
         this.projectById(draft, input.projectId);
       } else if (input.kind !== 'break' || input.projectId !== null) throw new AppFailure('INVALID_PROJECT');
-      this.assertNoConflict(draft, input);
-      this.appendRecord(draft, input.start, input.end, input.kind, input.projectId, 'manual');
     }
     // A backward wall clock must not let a current interval disappear from overlap checks.
     if (draft.runtime.active && now < draft.runtime.active.start) throw new AppFailure('CLOCK_INVALID');
+    if (command.overwriteIds !== undefined) this.replaceOverlaps(draft, inputs, command.overwriteIds, command.overwriteActive, now);
+    else if (command.overwriteActive !== undefined) throw new AppFailure('INVALID_COMMAND');
+    for (const input of inputs) {
+      this.assertNoConflict(draft, input);
+      this.appendRecord(draft, input.start, input.end, input.kind, input.projectId, 'manual');
+    }
+  }
+
+  private replaceOverlaps(draft: State, inputs: RecordInput[], overwriteIds: string[], overwriteActive: ActivePeriod | undefined, now: number): void {
+    if (!Array.isArray(overwriteIds) || overwriteIds.some(id => typeof id !== 'string') || new Set(overwriteIds).size !== overwriteIds.length) throw new AppFailure('INVALID_COMMAND');
+    const otherWork = draft.records.filter(record => inputs.some(input => needsOverwrite(record, input)));
+    if (otherWork.some(record => !overwriteIds.includes(record.id))) throw new AppFailure('OVERWRITE_REQUIRED');
+    if (overwriteIds.some(id => !otherWork.some(record => record.id === id))) throw new AppFailure('ACTIVE_CHANGED');
+    const active = draft.runtime.active;
+    const activeInput = active ? { ...active, end: Infinity } : null;
+    const activeChanges = activeInput ? inputs.filter(input => overlapRange(activeInput, input)) : [];
+    const needsActiveApproval = activeInput && activeChanges.some(input => needsOverwrite(activeInput, input));
+    if (needsActiveApproval && !overwriteActive) throw new AppFailure('OVERWRITE_REQUIRED');
+    if (overwriteActive && (!needsActiveApproval || !active || overwriteActive.start !== active.start
+      || overwriteActive.kind !== active.kind || overwriteActive.projectId !== active.projectId)) throw new AppFailure('ACTIVE_CHANGED');
+    // Ongoing recording can only be replaced through now, never into its future.
+    if (activeChanges.some(input => input.end > now)) throw new AppFailure('INVALID_RANGE');
+    draft.records = draft.records.flatMap(record => {
+      if (!inputs.some(input => overlapRange(record, input))) return [record];
+      return remainingRanges(record.start, record.end, inputs).map(range => ({ ...record, ...range, id: randomUUID() }));
+    });
+    if (active && activeChanges.length) {
+      const end = Math.max(...activeChanges.map(input => input.end));
+      for (const range of remainingRanges(active.start, end, inputs)) this.appendRecord(draft, range.start, range.end, active.kind, active.projectId, 'tracked');
+      draft.runtime.active = { ...active, start: end };
+      // Keep native activity anchors intact so the next idle check still covers the whole unresolved tail.
+    }
+  }
+
+  private adjustStart(draft: State, command: Extract<Command, { type: 'adjustStart' }>, now: number): void {
+    this.requireResolved(draft);
+    const active = draft.runtime.active;
+    if (!active || active.kind !== 'work' || active.start !== command.expectedStart || active.projectId !== command.projectId) throw new AppFailure('ACTIVE_CHANGED');
+    if (now < active.start) throw new AppFailure('CLOCK_INVALID');
+    if (!validTimestamp(command.start) || command.start > now) throw new AppFailure('INVALID_RANGE');
+    if (!Array.isArray(command.overwriteIds) || command.overwriteIds.some(id => typeof id !== 'string')
+      || new Set(command.overwriteIds).size !== command.overwriteIds.length) throw new AppFailure('INVALID_COMMAND');
+    const affected = draft.records.filter(record => record.end > record.start && record.end > command.start && record.start < active.start);
+    const otherWork = affected.filter(record => record.kind === 'work' && record.projectId !== active.projectId);
+    // Approval names the exact immutable record versions shown by the editor, never a blanket overwrite.
+    if (otherWork.some(record => !command.overwriteIds.includes(record.id))) throw new AppFailure('OVERWRITE_REQUIRED');
+    if (command.overwriteIds.some(id => !otherWork.some(record => record.id === id))) throw new AppFailure('ACTIVE_CHANGED');
+    if (command.start === active.start) return;
+    const affectedIds = new Set(affected.map(record => record.id));
+    draft.records = draft.records.filter(record => !affectedIds.has(record.id));
+    for (const record of affected) {
+      // Preserve the untouched prefix exactly, including source and sub-minute precision.
+      if (record.start < command.start) draft.records.push({ ...record, id: randomUUID(), end: command.start });
+    }
+    draft.runtime.active = null;
+    this.assertNoConflict(draft, { start: command.start, end: Infinity, kind: 'work', projectId: active.projectId });
+    draft.runtime.active = { ...active, start: command.start };
+    // A correction is not evidence of new input: retain the native idle/activity anchors.
   }
 
   private assertNoConflict(draft: State, input: RecordInput): void {

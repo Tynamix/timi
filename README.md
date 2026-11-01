@@ -86,7 +86,9 @@ Leave the switch off to show time worked. On days without a target, timi also sh
 <details>
 <summary><strong>Made a mistake? Edit, split, or add time.</strong></summary>
 
-Adjust start and end times, change project assignments, split a period, or delete an entry. Conflicts are explained before any records change. Finish current recording before editing that interval.
+Adjust start and end times, change project assignments, split a period, or delete an entry. Overlapping breaks and time from the same project are adjusted automatically. Replacing another project's time requires confirmation showing the affected intervals, including ongoing work. Only the overlapping parts are replaced; the remaining sections are kept, and ongoing tracking continues after the replaced interval. This also applies when adding missing time.
+
+To change the start of ongoing work, click its start time in the tracker or **Edit start time** on the running entry in the week overview. Moving the start earlier replaces overlapping breaks and fills untracked gaps automatically. Time from another project is listed for confirmation before it is overwritten; the rest of its record is kept. Moving the start later leaves the removed time untracked. Tracking continues throughout the edit.
 
 ![The time correction editor splitting a Brand design record into two editable intervals](docs/images/corrections.png)
 

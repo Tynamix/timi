@@ -75,7 +75,7 @@ Debug launches use `.cache/vscode-debug/`, separate from normal records, and the
 
 ## Pull requests and releases
 
-Every pull request targeting `main` and push to `main` runs type checking, unit tests and the build on Linux and macOS. Protect `main` with required pull requests and the checks `Verify (ubuntu-24.04)`, `Verify (macos-14)` and `Conventional PR title`. AI reviews use the native Codex GitHub integration, configured in Codex repository settings. Review guidance lives in [AGENTS.md](../AGENTS.md); no AI credentials are needed in GitHub Actions.
+Every pull request targeting `main` and push to `main` runs type checking, unit tests and the build on Linux and macOS. Protect `main` with required pull requests and the checks `Verify (ubuntu-24.04)`, `Verify (macos-15)` and `Conventional PR title`. AI reviews use the native Codex GitHub integration, configured in Codex repository settings. Review guidance lives in [AGENTS.md](../AGENTS.md); no AI credentials are needed in GitHub Actions.
 
 Use Conventional Commit PR titles and squash-merge with that title: `fix: …` creates a patch release, `feat: …` a minor release, and `feat!: …` or a `BREAKING CHANGE:` footer a major release. Documentation, CI and other maintenance-only changes do not create a release unless breaking. After merges to `main`, successful Linux and macOS checks allow semantic-release to publish a version tag, release notes, a signed and notarized universal macOS DMG and its checksum. Versions are calculated from reachable `vX.Y.Z` tags; without a previous release tag the first release is `1.0.0`. Version metadata is set before packaging, not committed back to `main`. The automatic `GITHUB_TOKEN` needs `contents: write`; no npm publishing token is needed.
 

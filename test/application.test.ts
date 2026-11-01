@@ -774,3 +774,487 @@ test('failed native idle transition replays original lock and return timestamps 
   assert.equal(resolved.records.length, 2);
   assert.equal(resolved.active!.start, BASE + 10 * MINUTE);
 });
+
+test('quick start edit absorbs breaks, same-project time and gaps, preserving untouched milliseconds', t => {
+  const f = fixture(t);
+  const projectId = createProject(f.app, 'Alpha');
+  execute(f.app, { type: 'correct', removeIds: [], records: [
+    { start: BASE - HOUR, end: BASE - 30 * MINUTE, kind: 'break', projectId: null },
+    { start: BASE - 20 * MINUTE, end: BASE - 10 * MINUTE, kind: 'work', projectId },
+    { start: BASE - 5 * MINUTE, end: BASE, kind: 'break', projectId: null },
+  ] });
+  execute(f.app, { type: 'start', name: 'Alpha' });
+  f.advance(123_456);
+  const start = BASE - 40 * MINUTE + 789;
+  const state = execute(f.app, { type: 'adjustStart', start, expectedStart: BASE, projectId, overwriteIds: [] });
+  assert.equal(state.active!.start, start);
+  assert.equal(state.records.length, 1);
+  assert.equal(state.records[0]!.start, BASE - HOUR);
+  assert.equal(state.records[0]!.end, start);
+  assert.equal(state.todayMs, f.now - start);
+  assert.equal(state.week.breakTotal, start - (BASE - HOUR));
+  assert.equal(f.store.load().runtime!.active!.start, start);
+});
+
+test('quick start edit requires every other project approval and only trims overlapping time', t => {
+  const f = fixture(t);
+  const beta = createProject(f.app, 'Beta');
+  const gamma = createProject(f.app, 'Gamma');
+  execute(f.app, { type: 'correct', removeIds: [], records: [
+    { start: BASE - HOUR, end: BASE - 30 * MINUTE, kind: 'work', projectId: beta },
+    { start: BASE - 20 * MINUTE, end: BASE, kind: 'work', projectId: gamma },
+  ] });
+  const projectId = execute(f.app, { type: 'start', name: 'Alpha' }).active!.projectId!;
+  const before = f.app.getSnapshot();
+  const durable = f.store.load();
+  const command = { type: 'adjustStart' as const, start: BASE - 40 * MINUTE + 123, expectedStart: BASE, projectId, overwriteIds: [] as string[] };
+  for (const overwriteIds of [[], [before.records[0]!.id]]) {
+    assert.throws(() => execute(f.app, { ...command, overwriteIds }), (error: unknown) => (error as { code: string }).code === 'OVERWRITE_REQUIRED');
+    assert.deepEqual(f.app.getSnapshot(), before);
+    assert.deepEqual(f.store.load(), durable);
+  }
+  const state = execute(f.app, { ...command, overwriteIds: before.records.map(record => record.id) });
+  assert.equal(state.records.length, 1);
+  assert.equal(state.records[0]!.projectId, beta);
+  assert.equal(state.records[0]!.start, BASE - HOUR);
+  assert.equal(state.records[0]!.end, command.start);
+  assert.equal(state.week.rows.find(row => row.projectId === beta)!.total, command.start - (BASE - HOUR));
+  assert.equal(state.week.rows.some(row => row.projectId === gamma), false);
+});
+
+test('quick start edit moves later without recording removed time and does not reset idle detection', t => {
+  const f = fixture(t);
+  const projectId = execute(f.app, { type: 'start', name: 'Alpha' }).active!.projectId!;
+  f.advance(2 * MINUTE);
+  const state = execute(f.app, { type: 'adjustStart', start: BASE + MINUTE + 123, expectedStart: BASE, projectId, overwriteIds: [] });
+  assert.equal(state.todayMs, MINUTE - 123);
+  assert.equal(state.records.length, 0);
+  f.setTime(BASE + 6 * MINUTE + 123);
+  sample(f.app, 6 * MINUTE + 123);
+  assert.equal(f.app.getSnapshot().pending!.start, BASE + MINUTE + 123);
+  assert.equal(f.app.getSnapshot().pending!.end, null);
+  assert.equal(f.app.getSnapshot().todayMs, 0);
+});
+
+test('quick start edit rejects invalid ranges, stale sessions and changed approval records', t => {
+  const f = fixture(t);
+  const beta = createProject(f.app, 'Beta');
+  let state = execute(f.app, { type: 'correct', removeIds: [], records: [
+    { start: BASE - HOUR, end: BASE, kind: 'work', projectId: beta },
+  ] });
+  const oldId = state.records[0]!.id;
+  const projectId = execute(f.app, { type: 'start', name: 'Alpha' }).active!.projectId!;
+  const command = { type: 'adjustStart' as const, start: BASE - MINUTE, expectedStart: BASE, projectId, overwriteIds: [oldId] };
+  const before = f.app.getSnapshot();
+  for (const invalid of [
+    { ...command, start: f.now + 1 }, { ...command, start: NaN }, { ...command, start: 8_640_000_000_000_001 },
+    { ...command, expectedStart: BASE - 1 }, { ...command, projectId: beta }, { ...command, overwriteIds: [oldId, oldId] },
+  ]) {
+    assert.throws(() => execute(f.app, invalid));
+    assert.deepEqual(f.app.getSnapshot(), before);
+  }
+  state = execute(f.app, { type: 'correct', removeIds: [oldId], records: [
+    { start: BASE - HOUR, end: BASE, kind: 'work', projectId: beta },
+  ] });
+  assert.throws(() => execute(f.app, command), (error: unknown) => (error as { code: string }).code === 'OVERWRITE_REQUIRED');
+  assert.deepEqual(f.app.getSnapshot(), state);
+  execute(f.app, { type: 'pause' });
+  assert.throws(() => execute(f.app, command));
+  execute(f.app, { type: 'resume' });
+  f.advance(5 * MINUTE);
+  sample(f.app, 5 * MINUTE);
+  const pending = f.app.getSnapshot();
+  assert.throws(() => execute(f.app, command), (error: unknown) => (error as { code: string }).code === 'PENDING_REQUIRED');
+  assert.deepEqual(f.app.getSnapshot(), pending);
+});
+
+test('failed quick start edit rolls back SQLite and memory, retries once and recovers only to its checkpoint', t => {
+  const f = fixture(t);
+  const beta = createProject(f.app, 'Beta');
+  execute(f.app, { type: 'correct', removeIds: [], records: [
+    { start: BASE - HOUR, end: BASE, kind: 'work', projectId: beta },
+  ] });
+  const projectId = execute(f.app, { type: 'start', name: 'Alpha' }).active!.projectId!;
+  f.advance(MINUTE);
+  sample(f.app);
+  f.app.checkpoint();
+  const before = f.app.getSnapshot();
+  const durable = f.store.load();
+  const command = { type: 'adjustStart' as const, start: BASE - 30 * MINUTE, expectedStart: BASE, projectId, overwriteIds: before.records.map(record => record.id) };
+  const writeState = f.store.writeState.bind(f.store);
+  f.store.writeState = (...args) => { writeState(...args); throw new Error('failure after SQLite changes'); };
+  assert.throws(() => execute(f.app, command));
+  assert.deepEqual(f.app.getSnapshot(), before);
+  assert.deepEqual(f.store.load(), durable);
+  f.store.writeState = writeState;
+  execute(f.app, command);
+  f.store.close();
+  f.advance(HOUR);
+  const recovered = f.open().app.getSnapshot();
+  assert.equal(recovered.mode, 'untracked');
+  assert.equal(recovered.pending, null);
+  assert.equal(recovered.records.length, 2);
+  assert.equal(recovered.records[0]!.end, command.start);
+  assert.equal(recovered.records[1]!.start, command.start);
+  assert.equal(recovered.records[1]!.end, BASE + MINUTE);
+  assert.equal(recovered.week.workTotal, HOUR + MINUTE);
+});
+
+test('quick start edit across DST and local midnight counts actual elapsed milliseconds in Europe/Berlin', t => {
+  const previousTimezone = process.env.TZ;
+  process.env.TZ = 'Europe/Berlin';
+  t.after(() => { if (previousTimezone === undefined) delete process.env.TZ; else process.env.TZ = previousTimezone; });
+  const start = new Date('2026-10-24T23:30:00.123+02:00').getTime();
+  const original = new Date('2026-10-25T03:30:00.456+01:00').getTime();
+  const f = fixture(t, original);
+  const projectId = execute(f.app, { type: 'start', name: 'Alpha' }).active!.projectId!;
+  f.advance(1_234);
+  const state = execute(f.app, { type: 'adjustStart', start, expectedStart: original, projectId, overwriteIds: [] });
+  const midnight = new Date('2026-10-25T00:00:00+02:00').getTime();
+  assert.equal(state.week.workTotal, f.now - start);
+  assert.equal(state.todayMs, f.now - midnight);
+  assert.equal(state.week.workDays[5], midnight - start);
+  assert.equal(state.week.workDays[6], f.now - midnight);
+});
+
+test('editor replacement automatically cuts breaks and same-project records around multiple input segments', t => {
+  const f = fixture(t);
+  const projectId = createProject(f.app, 'Alpha');
+  const before = execute(f.app, { type: 'correct', removeIds: [], records: [
+    { start: BASE - 3 * HOUR, end: BASE - 2 * HOUR, kind: 'break', projectId: null },
+    { start: BASE - 2 * HOUR, end: BASE, kind: 'work', projectId },
+  ] });
+  const records = [
+    { start: BASE - 150 * MINUTE + 123, end: BASE - 90 * MINUTE + 456, kind: 'work' as const, projectId },
+    { start: BASE - 60 * MINUTE + 789, end: BASE - 30 * MINUTE + 987, kind: 'work' as const, projectId },
+  ];
+  const state = execute(f.app, { type: 'correct', removeIds: [], records, overwriteIds: [] });
+  assert.equal(state.records.length, 5);
+  assert.equal(duration(state.records), 3 * HOUR);
+  assert.equal(state.week.breakTotal, records[0].start - (BASE - 3 * HOUR));
+  assert.equal(state.week.workTotal, 3 * HOUR - state.week.breakTotal);
+  assert.equal(state.records[0]!.start, before.records[0]!.start);
+  assert.equal(state.records.at(-1)!.end, BASE);
+  assert.equal(f.store.load().records.length, 5);
+});
+
+test('editing a saved entry asks for every other project and preserves prefixes, suffixes and holes', t => {
+  const f = fixture(t);
+  const alpha = createProject(f.app, 'Alpha'), beta = createProject(f.app, 'Beta');
+  const initial = execute(f.app, { type: 'correct', removeIds: [], records: [
+    { start: BASE - 4 * HOUR, end: BASE - 3 * HOUR, kind: 'work', projectId: alpha },
+    { start: BASE - 3 * HOUR, end: BASE, kind: 'work', projectId: beta },
+  ] });
+  const original = initial.records[0]!, other = initial.records[1]!;
+  const command = { type: 'correct' as const, removeIds: [original.id], records: [
+    { start: original.start, end: BASE - 150 * MINUTE + 123, kind: 'work' as const, projectId: alpha },
+    { start: BASE - 90 * MINUTE + 456, end: BASE - 30 * MINUTE + 789, kind: 'work' as const, projectId: alpha },
+  ], overwriteIds: [] as string[] };
+  assert.throws(() => execute(f.app, command), (error: unknown) => (error as { code: string }).code === 'OVERWRITE_REQUIRED');
+  assert.deepEqual(f.app.getSnapshot(), initial);
+  const state = execute(f.app, { ...command, overwriteIds: [other.id] });
+  const betaRecords = state.records.filter(record => record.projectId === beta);
+  assert.equal(betaRecords.length, 2);
+  assert.equal(betaRecords[0]!.start, command.records[0].end);
+  assert.equal(betaRecords[0]!.end, command.records[1].start);
+  assert.equal(betaRecords[1]!.start, command.records[1].end);
+  assert.equal(betaRecords[1]!.end, BASE);
+  assert.equal(state.week.workTotal, 4 * HOUR);
+});
+
+test('editor replacement of work by a break needs approval and rejects stale record approvals', t => {
+  const f = fixture(t);
+  const projectId = createProject(f.app, 'Alpha');
+  const before = execute(f.app, { type: 'correct', removeIds: [], records: [
+    { start: BASE - HOUR, end: BASE, kind: 'work', projectId },
+  ] });
+  const command = { type: 'correct' as const, removeIds: [], records: [
+    { start: BASE - 40 * MINUTE, end: BASE - 20 * MINUTE, kind: 'break' as const, projectId: null },
+  ], overwriteIds: [] as string[] };
+  assert.throws(() => execute(f.app, command));
+  const state = execute(f.app, { ...command, overwriteIds: [before.records[0]!.id] });
+  assert.equal(state.week.breakTotal, 20 * MINUTE);
+  assert.equal(state.todayMs, 40 * MINUTE);
+  assert.throws(() => execute(f.app, { ...command, overwriteIds: [before.records[0]!.id] }));
+  assert.deepEqual(f.app.getSnapshot(), state);
+});
+
+test('editor replacement can cut multiple sections from ongoing work with approval and retain native idle anchors', t => {
+  const f = fixture(t);
+  const alpha = createProject(f.app, 'Alpha');
+  const active = execute(f.app, { type: 'start', name: 'Beta' }).active!;
+  for (let minute = 0; minute < 10; minute++) { f.advance(MINUTE); sample(f.app); }
+  const before = f.app.getSnapshot();
+  const command = { type: 'correct' as const, removeIds: [], overwriteIds: [], records: [
+    { start: BASE + MINUTE + 123, end: BASE + 2 * MINUTE + 456, kind: 'work' as const, projectId: alpha },
+    { start: BASE + 4 * MINUTE + 789, end: BASE + 6 * MINUTE + 987, kind: 'work' as const, projectId: alpha },
+  ] };
+  assert.throws(() => execute(f.app, command), (error: unknown) => (error as { code: string }).code === 'OVERWRITE_REQUIRED');
+  assert.deepEqual(f.app.getSnapshot(), before);
+  const state = execute(f.app, { ...command, overwriteActive: active });
+  assert.equal(state.active!.projectId, active.projectId);
+  assert.equal(state.active!.start, command.records[1].end);
+  assert.equal(state.records.length, 4);
+  assert.equal(state.todayMs, 10 * MINUTE);
+  assert.equal(state.records[0]!.start, BASE);
+  assert.equal(state.records[0]!.end, command.records[0].start);
+  assert.equal(state.records[2]!.start, command.records[0].end);
+  assert.equal(state.records[2]!.end, command.records[1].start);
+  f.advance(5 * MINUTE);
+  sample(f.app, 5 * MINUTE);
+  assert.equal(f.app.getSnapshot().pending!.start, BASE + 10 * MINUTE);
+  assert.equal(f.app.getSnapshot().todayMs, 10 * MINUTE);
+});
+
+test('editor replacement handles ongoing breaks and same-project work automatically but protects future and pending time', t => {
+  const f = fixture(t);
+  const projectId = execute(f.app, { type: 'start', name: 'Alpha' }).active!.projectId!;
+  f.advance(2 * MINUTE);
+  sample(f.app);
+  let state = execute(f.app, { type: 'correct', removeIds: [], overwriteIds: [], records: [
+    { start: BASE, end: BASE + MINUTE, kind: 'work', projectId },
+  ] });
+  assert.equal(state.active!.start, BASE + MINUTE);
+  assert.equal(state.todayMs, 2 * MINUTE);
+  assert.throws(() => execute(f.app, { type: 'correct', removeIds: [], overwriteIds: [], records: [
+    { start: BASE + MINUTE, end: f.now + 1, kind: 'work', projectId },
+  ] }));
+  assert.deepEqual(f.app.getSnapshot(), state);
+  execute(f.app, { type: 'pause' });
+  f.advance(2 * MINUTE);
+  state = execute(f.app, { type: 'correct', removeIds: [], overwriteIds: [], records: [
+    { start: BASE + 2 * MINUTE, end: BASE + 3 * MINUTE, kind: 'work', projectId },
+  ] });
+  assert.equal(state.active!.kind, 'break');
+  assert.equal(state.active!.start, BASE + 3 * MINUTE);
+  assert.equal(state.resumeProjectId, projectId);
+  assert.equal(state.todayMs, 3 * MINUTE);
+  execute(f.app, { type: 'resume' });
+  f.advance(5 * MINUTE);
+  sample(f.app, 5 * MINUTE);
+  const before = f.app.getSnapshot();
+  assert.throws(() => execute(f.app, { type: 'correct', removeIds: [], overwriteIds: [], records: [
+    { start: BASE + 3 * MINUTE, end: f.now, kind: 'work', projectId },
+  ] }));
+  assert.deepEqual(f.app.getSnapshot(), before);
+});
+
+test('editor replacement rejects changed active approvals and overlaps between replacement segments atomically', t => {
+  const f = fixture(t);
+  const alpha = createProject(f.app, 'Alpha');
+  const active = execute(f.app, { type: 'start', name: 'Beta' }).active!;
+  f.advance(2 * MINUTE);
+  const command = { type: 'correct' as const, removeIds: [], overwriteIds: [], overwriteActive: active, records: [
+    { start: BASE, end: BASE + MINUTE, kind: 'work' as const, projectId: alpha },
+  ] };
+  let before = f.app.getSnapshot();
+  assert.throws(() => execute(f.app, { ...command, overwriteActive: { ...active, start: BASE - 1 } }));
+  assert.throws(() => execute(f.app, { ...command, records: [...command.records, { ...command.records[0], start: BASE + 1 }] }));
+  assert.deepEqual(f.app.getSnapshot(), before);
+  execute(f.app, { type: 'start', name: 'Gamma' });
+  before = f.app.getSnapshot();
+  assert.throws(() => execute(f.app, command));
+  assert.deepEqual(f.app.getSnapshot(), before);
+});
+
+test('failed editor overwrite rolls back saved splits and active changes, retries once and crash recovery ends at checkpoint', t => {
+  const f = fixture(t);
+  const alpha = createProject(f.app, 'Alpha'), beta = createProject(f.app, 'Beta');
+  const initial = execute(f.app, { type: 'correct', removeIds: [], records: [
+    { start: BASE - HOUR, end: BASE - 30 * MINUTE, kind: 'work', projectId: alpha },
+    { start: BASE - 30 * MINUTE, end: BASE, kind: 'work', projectId: beta },
+  ] });
+  const active = execute(f.app, { type: 'start', name: 'Beta' }).active!;
+  f.advance(2 * MINUTE);
+  sample(f.app);
+  f.app.checkpoint();
+  const command = { type: 'correct' as const, removeIds: [initial.records[0]!.id], overwriteIds: [initial.records[1]!.id], overwriteActive: active, records: [
+    { start: BASE - HOUR, end: BASE + MINUTE, kind: 'work' as const, projectId: alpha },
+  ] };
+  const before = f.app.getSnapshot(), durable = f.store.load();
+  const writeState = f.store.writeState.bind(f.store);
+  f.store.writeState = (...args) => { writeState(...args); throw new Error('failed after SQLite changes'); };
+  assert.throws(() => execute(f.app, command));
+  assert.deepEqual(f.app.getSnapshot(), before);
+  assert.deepEqual(f.store.load(), durable);
+  f.store.writeState = writeState;
+  const saved = execute(f.app, command);
+  assert.equal(saved.records.length, 1);
+  assert.equal(saved.active!.start, BASE + MINUTE);
+  f.store.close();
+  f.advance(HOUR);
+  const recovered = f.open().app.getSnapshot();
+  assert.equal(recovered.active, null);
+  assert.equal(recovered.pending, null);
+  assert.equal(recovered.records.length, 2);
+  assert.equal(recovered.records[1]!.end, BASE + 2 * MINUTE);
+  assert.equal(recovered.week.workTotal, HOUR + 2 * MINUTE);
+});
+
+test('editing ongoing work preserves the whole unconfirmed idle streak around explicit corrections', t => {
+  const f = fixture(t);
+  const projectId = execute(f.app, { type: 'start', name: 'Alpha' }).active!.projectId!;
+  f.advance(4 * MINUTE);
+  sample(f.app, 4 * MINUTE);
+  execute(f.app, { type: 'correct', removeIds: [], overwriteIds: [], records: [
+    { start: BASE + 2 * MINUTE, end: BASE + 3 * MINUTE, kind: 'work', projectId },
+  ] });
+  f.advance(MINUTE);
+  sample(f.app, 5 * MINUTE);
+  let state = f.app.getSnapshot();
+  assert.equal(state.mode, 'pending');
+  assert.equal(state.pending!.start, BASE);
+  assert.equal(state.pending!.end, BASE + 2 * MINUTE);
+  assert.equal(state.todayMs, MINUTE);
+  state = execute(f.app, { type: 'resolve', choice: 'break' });
+  assert.equal(state.pending!.start, BASE + 3 * MINUTE);
+  assert.equal(state.pending!.end, null);
+  assert.equal(state.active, null);
+  f.advance(MINUTE);
+  state = execute(f.app, { type: 'resolve', choice: 'break' });
+  assert.equal(state.mode, 'work');
+  assert.equal(state.active!.start, BASE + 6 * MINUTE);
+  assert.equal(state.todayMs, MINUTE);
+  assert.equal(state.week.breakTotal, 5 * MINUTE);
+});
+
+test('split work still detects an unsampled idle streak when native activity returns', t => {
+  const f = fixture(t);
+  const projectId = execute(f.app, { type: 'start', name: 'Alpha' }).active!.projectId!;
+  f.advance(4 * MINUTE);
+  sample(f.app, 4 * MINUTE);
+  execute(f.app, { type: 'correct', removeIds: [], overwriteIds: [], records: [
+    { start: BASE + 2 * MINUTE, end: BASE + 3 * MINUTE, kind: 'work', projectId },
+  ] });
+  f.advance(2 * MINUTE);
+  sample(f.app);
+  const state = f.app.getSnapshot();
+  assert.equal(state.pending!.start, BASE);
+  assert.equal(state.pending!.end, BASE + 2 * MINUTE);
+  assert.equal(state.canPresent, true);
+  assert.equal(state.todayMs, MINUTE);
+  assert.equal(f.store.load().runtime!.pendingQueue[0]!.start, BASE + 3 * MINUTE);
+});
+
+test('split work keeps exact confirmed prefixes and multiple unresolved fragments after further corrections', t => {
+  const f = fixture(t);
+  const projectId = execute(f.app, { type: 'start', name: 'Alpha' }).active!.projectId!;
+  f.advance(30_123);
+  sample(f.app);
+  const activity = f.now;
+  f.setTime(BASE + 4 * MINUTE);
+  sample(f.app, f.now - activity);
+  let state = execute(f.app, { type: 'correct', removeIds: [], overwriteIds: [], records: [
+    { start: BASE + 2 * MINUTE + 123, end: BASE + 3 * MINUTE + 456, kind: 'work', projectId },
+    { start: BASE + 210_789, end: BASE + 240_000, kind: 'work', projectId },
+  ] });
+  const original = state.records.find(record => record.source === 'tracked')!;
+  state = execute(f.app, { type: 'correct', removeIds: [], overwriteIds: [], records: [
+    { start: BASE + MINUTE, end: BASE + 90_000, kind: 'work', projectId },
+  ] });
+  assert.equal(state.records.some(record => record.id === original.id), false);
+  f.setTime(activity + 5 * MINUTE);
+  sample(f.app, 5 * MINUTE);
+  const periods = [f.app.getSnapshot().pending!, ...f.store.load().runtime!.pendingQueue];
+  assert.deepEqual(periods.map(period => [period.start, period.end]), [
+    [activity, BASE + MINUTE], [BASE + 90_000, BASE + 2 * MINUTE + 123],
+    [BASE + 3 * MINUTE + 456, BASE + 210_789], [BASE + 240_000, null],
+  ]);
+  assert.equal(f.app.getSnapshot().todayMs, 30_123 + 30_000 + 60_333 + 29_211);
+});
+
+test('native input before the idle threshold confirms split work without a later clarification for that prefix', t => {
+  const f = fixture(t);
+  const projectId = execute(f.app, { type: 'start', name: 'Alpha' }).active!.projectId!;
+  f.advance(4 * MINUTE);
+  sample(f.app, 4 * MINUTE);
+  execute(f.app, { type: 'correct', removeIds: [], overwriteIds: [], records: [
+    { start: BASE + 2 * MINUTE, end: BASE + 3 * MINUTE, kind: 'work', projectId },
+  ] });
+  f.advance(30_000);
+  sample(f.app);
+  f.advance(5 * MINUTE);
+  sample(f.app, 5 * MINUTE);
+  const state = f.app.getSnapshot();
+  assert.equal(state.pending!.start, BASE + 270_000);
+  assert.equal(state.todayMs, 270_000);
+  assert.equal(f.store.load().runtime!.pendingQueue.length, 0);
+});
+
+test('Stop fixes every split idle fragment and never resumes recording after clarification', t => {
+  const f = fixture(t);
+  const projectId = execute(f.app, { type: 'start', name: 'Alpha' }).active!.projectId!;
+  f.advance(4 * MINUTE);
+  sample(f.app, 4 * MINUTE);
+  execute(f.app, { type: 'correct', removeIds: [], overwriteIds: [], records: [
+    { start: BASE + 2 * MINUTE, end: BASE + 3 * MINUTE, kind: 'work', projectId },
+  ] });
+  f.advance(MINUTE);
+  sample(f.app, 5 * MINUTE);
+  f.advance(MINUTE);
+  execute(f.app, { type: 'stop' });
+  const queue = f.store.load().runtime!.pendingQueue;
+  assert.equal(queue[0]!.end, BASE + 6 * MINUTE);
+  assert.equal(queue[0]!.resume, false);
+  f.advance(MINUTE);
+  execute(f.app, { type: 'resolve', choice: 'discard' });
+  const state = execute(f.app, { type: 'resolve', choice: 'break' });
+  assert.equal(state.mode, 'untracked');
+  assert.equal(state.todayMs, MINUTE);
+  assert.equal(state.week.breakTotal, 3 * MINUTE);
+});
+
+test('a failed split idle classification rolls back SQLite and replays the original fragments exactly once', t => {
+  const f = fixture(t);
+  const projectId = execute(f.app, { type: 'start', name: 'Alpha' }).active!.projectId!;
+  f.advance(4 * MINUTE);
+  sample(f.app, 4 * MINUTE);
+  execute(f.app, { type: 'correct', removeIds: [], overwriteIds: [], records: [
+    { start: BASE + 2 * MINUTE, end: BASE + 3 * MINUTE, kind: 'work', projectId },
+  ] });
+  const durable = f.store.load();
+  f.advance(MINUTE);
+  const before = f.app.getSnapshot();
+  const writeState = f.store.writeState.bind(f.store);
+  f.store.writeState = (...args) => { writeState(...args); throw new Error('failed after SQLite changes'); };
+  assert.throws(() => sample(f.app, 5 * MINUTE));
+  assert.deepEqual(f.app.getSnapshot(), before);
+  assert.deepEqual(f.store.load(), durable);
+  f.store.writeState = writeState;
+  sample(f.app, 5 * MINUTE);
+  const state = f.app.getSnapshot();
+  assert.equal(state.pending!.start, BASE);
+  assert.equal(state.pending!.end, BASE + 2 * MINUTE);
+  assert.equal(f.store.load().runtime!.pendingQueue.length, 1);
+  assert.equal(state.records.length, 1);
+});
+
+test('crash recovery includes unconfirmed split prefixes only through the last durable checkpoint', t => {
+  const f = fixture(t);
+  const projectId = execute(f.app, { type: 'start', name: 'Alpha' }).active!.projectId!;
+  f.advance(4 * MINUTE);
+  sample(f.app, 4 * MINUTE);
+  execute(f.app, { type: 'correct', removeIds: [], overwriteIds: [], records: [
+    { start: BASE + 2 * MINUTE, end: BASE + 3 * MINUTE, kind: 'work', projectId },
+  ] });
+  f.advance(30_000);
+  sample(f.app); // Unsaved activity must not confirm the prefix after a crash.
+  f.store.close();
+  f.advance(HOUR);
+  const reopened = f.open();
+  let state = reopened.app.getSnapshot();
+  assert.equal(state.mode, 'pending');
+  assert.equal(state.pending!.reason, 'recovery');
+  assert.equal(state.pending!.start, BASE);
+  assert.equal(state.pending!.end, BASE + 2 * MINUTE);
+  assert.equal(state.todayMs, MINUTE);
+  const tail = reopened.store.load().runtime!.pendingQueue[0]!;
+  assert.equal(tail.start, BASE + 3 * MINUTE);
+  assert.equal(tail.end, BASE + 4 * MINUTE);
+  assert.equal(tail.resume, false);
+  execute(reopened.app, { type: 'resolve', choice: 'break' });
+  state = execute(reopened.app, { type: 'resolve', choice: 'break' });
+  assert.equal(state.mode, 'untracked');
+  assert.equal(state.todayMs, MINUTE);
+  assert.equal(state.week.breakTotal, 3 * MINUTE);
+});

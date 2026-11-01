@@ -2,9 +2,12 @@ import { desktopReady } from '../desktop';
 import { correctionLocalTimes, localMinuteInput } from './time-input';
 import { parseWorkHours } from './work-hours';
 import { dailyTargetMs, hoursMs, weeklyTargetMs } from '../core/work-goals';
+import { needsOverwrite, overlapRange } from '../core/corrections';
 import type { AppError, Command, Environment, Locale, Project, RecordInput, Result, Snapshot, TimeRecord, UpdateStatus, WindowKind, WorkspaceView } from '../shared';
 
 const en = {
+  overwriteCorrectionHelp: 'Only the listed overlapping time will be replaced by your changes. All other parts are kept. Ongoing tracking continues after the replaced interval.',
+  editStart: 'Edit start time', editStartHelp: 'Breaks and untracked time are added to this project when moving the start earlier. Moving it later leaves the removed time untracked.', runningSince: 'Started {date}', invalidStart: 'Enter a valid start time that is not in the future.', overwriteTitle: 'Overwrite time from another project?', overwriteHelp: 'Only the following overlapping time will be assigned to {project}. The rest of each record is kept.', confirmOverwrite: 'Overwrite and save', errorActiveChanged: 'Tracking or the affected records have changed. Close this editor and try again.', errorOverwriteRequired: 'Another project overlaps this time. Save again to review and confirm the affected time.',
   updates: 'App updates', updateHelp: 'Checks GitHub at startup and every six hours. Your time records stay on this Mac. Installation restarts timi with tracking stopped.', updateCheck: 'Check for updates', updateInstall: 'Update and restart', updateRestart: 'Retry restart', updateAvailable: 'Version {version} is available', updateIdle: 'No update check yet.', updateCurrent: 'You are up to date.', updateChecking: 'Checking for updates…', updateDownloading: 'Downloading and verifying update…', updateInstalling: 'Saving time records and installing…', updateDisabled: 'Updates are available in release builds.', updateError: 'The update could not be completed. Check your internet connection and that timi is installed in Applications, then retry. Tracking remains available.', updateRestartError: 'The update is installed. timi stays open until your time records can be saved. Retry the restart.',
   menuBarDisplay: 'Menu bar', showRemaining: 'Show remaining working time', showRemainingHelp: 'Off: worked time. On: time left until your daily target.', showRemainingFallback: 'Without a daily target, worked time is shown. Overtime appears with a minus sign.',
   workGoals: 'Working time targets', workGoalsIntro: 'Your regular hours, day by day.', workGoalsHelp: '0 = day off · Decimal hours: 7.6 h = 7 h 36 min', hours: 'hours', weeklyTarget: 'Weekly target', goalDays: '{days} working days · Mon–Sun', dayOff: 'Day off', goalReminders: 'Notifications', dailyGoalToggle: 'Daily target reached', weeklyGoalToggle: 'Weekly target reached', dailyGoalHelp: 'One notification per day', weeklyGoalHelp: 'One notification per week', goalNotificationSummary: 'About notifications', goalNotificationHelp: 'Breaks and unresolved time are excluded. Notifications do not repeat after restarting timi. Allow notifications for timi in System Settings → Notifications.', invalidWorkHours: 'Enter 0 to 24 hours for each weekday, for example 7.6 or 7,6.', target: 'Target',
@@ -16,10 +19,12 @@ const en = {
   manageProjects: 'Manage projects', manageHelp: 'Rename a project without changing its history. Archived projects stay in reports.', createProject: 'Create project', newProjectName: 'New project name', rename: 'Rename', archive: 'Archive', restore: 'Restore', noManagedProjects: 'No projects yet.',
   settingsTitle: 'Settings', settingsIntro: 'A few preferences. Everything stays on this Mac.', timing: 'Timing', idleThreshold: 'Ask after inactivity', idleHelp: 'When this threshold is reached, all time since your last activity awaits clarification. The current inactivity streak uses the new value immediately.', reminderInterval: 'Remind me to choose a project', reminderHelp: 'Counts only active use without tracking. Work, breaks, sleep, lock and inactivity do not count.', minutes: 'minutes', saveSettings: 'Save preferences', saved: 'Preferences saved', launchAtLogin: 'Open timi at login', loginHelp: 'Start in the menu bar, ready for you to choose a project.', loginUnavailable: 'Available in the packaged macOS app.', loginApproval: 'Allow timi in System Settings → General → Login Items to enable this.', privacy: 'Local and offline. timi reads only the system’s inactivity duration; it never reads what you type or which apps you use.', version: 'Version {version} · macOS 13+',
   clarificationTitle: 'How should this time count?', clarificationIdle: 'You were away from your keyboard or your Mac was locked or asleep. Choose how to record the whole interval.', clarificationRecovery: 'timi did not finish its previous session cleanly. Review the saved uncertainty once; tracking will remain stopped.', idleContinuing: 'This interval continues through your decision, including any further inactivity. Your previous project resumes at that instant unless tracking has ended.', fixedContinuing: 'Tracking has ended. This interval has a fixed end, and answering will not resume tracking.', recoveryContinuing: 'Only the saved uncertain interval is included. Time while timi was closed is never added.', workFor: 'Work for {project}', workChoice: 'Record as work', breakChoice: 'Record as a break', discardChoice: 'Discard this time', breakChoiceHelp: 'A break without a project', discardChoiceHelp: 'Exclude it from work and breaks', recoveryProject: 'Project for recovered work', recoveryPlaceholder: 'Choose or enter a project', recoveryHelp: 'Recovery can be assigned to another project. A new name creates a project.', intervalFrom: 'From {date}', intervalTo: 'To {date}', awaiting: 'All time has been classified.',
-  addTimeTitle: 'Add missing time', editTimeTitle: 'Edit time record', editHelp: 'Changes are saved together. Existing records and ongoing tracking must not overlap.', addHelp: 'Add work or a projectless break. Create projects below the week table if needed.', segment: 'Period {number}', split: 'Split', removeSegment: 'Remove', splitHelp: 'Split at the midpoint, then adjust the shared boundary and assignment before saving.', saveChanges: 'Save changes', cancel: 'Cancel', deleteRecord: 'Delete record', deleteConfirm: 'Delete this record permanently? This removes its time from all totals.', confirmDelete: 'Delete permanently', keepRecord: 'Keep record', chooseProject: 'Choose a project', boundaryHelp: 'Local time · minute precision. Unchanged boundaries stay exact. Offset: {offset}', ambiguousTime: 'This clock time occurs twice. Choose which occurrence.', firstOccurrence: 'First occurrence ({offset})', secondOccurrence: 'Second occurrence ({offset})', invalidDate: 'Enter a valid start and end, with the end after the start.', invalidProject: 'Select a project for each work period.', invalidSettings: 'Use positive whole minutes that can be represented safely. Preferences were not changed.', projectNameRequired: 'Enter a project name.', splitTooShort: 'This period is too short to split.',
+  addTimeTitle: 'Add missing time', editTimeTitle: 'Edit time record', editHelp: 'Changes are saved together. Breaks are adjusted automatically. Replacing time from another project requires confirmation.', addHelp: 'Add work or a projectless break. Create projects below the week table if needed.', segment: 'Period {number}', split: 'Split', removeSegment: 'Remove', splitHelp: 'Split at the midpoint, then adjust the shared boundary and assignment before saving.', saveChanges: 'Save changes', cancel: 'Cancel', deleteRecord: 'Delete record', deleteConfirm: 'Delete this record permanently? This removes its time from all totals.', confirmDelete: 'Delete permanently', keepRecord: 'Keep record', chooseProject: 'Choose a project', boundaryHelp: 'Local time · minute precision. Unchanged boundaries stay exact. Offset: {offset}', ambiguousTime: 'This clock time occurs twice. Choose which occurrence.', firstOccurrence: 'First occurrence ({offset})', secondOccurrence: 'Second occurrence ({offset})', invalidDate: 'Enter a valid start and end, with the end after the start.', invalidProject: 'Select a project for each work period.', invalidSettings: 'Use positive whole minutes that can be represented safely. Preferences were not changed.', projectNameRequired: 'Enter a project name.', splitTooShort: 'This period is too short to split.',
   errorStorage: 'timi could not save or read its data. Your previous state has been preserved. Check free disk space and folder access, then try again.', errorStorageVersion: 'This data was created by a newer timi version. It has not been replaced.', errorStorageInvalid: 'The saved data cannot be read safely. It has not been replaced.', errorCommand: 'This action is not valid right now.', errorProjectExists: 'A project with that name already exists. Choose a different name.', errorInvalidProject: 'Enter or select a valid project.', errorProjectMissing: 'That project could not be found. Refresh and try again.', errorPending: 'Resolve the pending time question before starting work or a break.', errorOverlap: 'This period overlaps saved or ongoing work or a break. Adjust its boundaries; no records were changed.', errorRecordMissing: 'That record no longer exists. Close this editor and try again.', errorClock: 'The system clock moved backwards or is invalid. Check the date and time and try again.', errorGeneric: 'The action could not be completed. Please try again.', errorActivity: 'macOS inactivity could not be read. Please try again; timi has kept the previous state.', errorLogin: 'The macOS login setting could not be updated. Check System Settings → General → Login Items.', errorConflictTime: 'Conflicting interval: {start} – {end}.', errorDetailsProject: 'Project: {project}.', dismissError: 'Dismiss message', close: 'Close', refresh: 'Refresh', noProject: 'No project',
 } as const;
 const de: Record<keyof typeof en, string> = {
+  overwriteCorrectionHelp: 'Nur die aufgeführten überschneidenden Zeiten werden durch deine Änderungen ersetzt. Alle anderen Abschnitte bleiben erhalten. Eine laufende Erfassung läuft nach dem ersetzten Zeitraum weiter.',
+  editStart: 'Startzeit ändern', editStartHelp: 'Beim Vorziehen werden Pausen und nicht erfasste Zeit diesem Projekt zugerechnet. Beim Verschieben nach hinten bleibt die entfernte Zeit unerfasst.', runningSince: 'Beginn {date}', invalidStart: 'Gib eine gültige Startzeit ein, die nicht in der Zukunft liegt.', overwriteTitle: 'Zeit eines anderen Projekts überschreiben?', overwriteHelp: 'Nur die folgenden überschneidenden Zeitspannen werden {project} zugeordnet. Der Rest der Einträge bleibt erhalten.', confirmOverwrite: 'Überschreiben und speichern', errorActiveChanged: 'Die Erfassung oder die betroffenen Einträge wurden geändert. Schließe die Bearbeitung und versuche es erneut.', errorOverwriteRequired: 'Ein anderes Projekt überschneidet sich mit dieser Zeit. Speichere erneut, um die betroffenen Zeiten zu prüfen und zu bestätigen.',
   updates: 'App-Updates', updateHelp: 'Prüft GitHub beim Start und alle sechs Stunden. Deine Zeitdaten bleiben auf diesem Mac. Die Installation startet timi mit gestoppter Erfassung neu.', updateCheck: 'Nach Updates suchen', updateInstall: 'Aktualisieren und neu starten', updateRestart: 'Neustart erneut versuchen', updateAvailable: 'Version {version} ist verfügbar', updateIdle: 'Noch nicht nach Updates gesucht.', updateCurrent: 'Du bist auf dem neuesten Stand.', updateChecking: 'Updates werden gesucht…', updateDownloading: 'Update wird geladen und geprüft…', updateInstalling: 'Zeitdaten werden gespeichert, Update wird installiert…', updateDisabled: 'Updates sind in Release-Versionen verfügbar.', updateError: 'Das Update konnte nicht abgeschlossen werden. Prüfe deine Internetverbindung und ob timi unter Programme installiert ist. Versuche es dann erneut. Die Zeiterfassung bleibt verfügbar.', updateRestartError: 'Das Update ist installiert. timi bleibt geöffnet, bis deine Zeitdaten gespeichert werden können. Versuche den Neustart erneut.',
   menuBarDisplay: 'Menüleiste', showRemaining: 'Restarbeitszeit anzeigen', showRemainingHelp: 'Aus: gearbeitete Zeit. Ein: verbleibende Zeit bis zum Tagesziel.', showRemainingFallback: 'Ohne Tagesziel wird die gearbeitete Zeit angezeigt. Überstunden erscheinen mit Minuszeichen.',
   workGoals: 'Arbeitszeitziele', workGoalsIntro: 'Deine reguläre Arbeitszeit pro Tag.', workGoalsHelp: '0 = frei · Dezimalstunden: 7,6 h = 7 Std. 36 Min.', hours: 'Stunden', weeklyTarget: 'Wochenziel', goalDays: '{days} Arbeitstage · Mo–So', dayOff: 'Frei', goalReminders: 'Benachrichtigungen', dailyGoalToggle: 'Tagesziel erreicht', weeklyGoalToggle: 'Wochenziel erreicht', dailyGoalHelp: 'Eine Mitteilung pro Tag', weeklyGoalHelp: 'Eine Mitteilung pro Woche', goalNotificationSummary: 'Hinweise zu Mitteilungen', goalNotificationHelp: 'Pausen und ungeklärte Zeit zählen nicht mit. Mitteilungen wiederholen sich auch nach einem Neustart von timi nicht. Erlaube Mitteilungen für timi unter Systemeinstellungen → Mitteilungen.', invalidWorkHours: 'Gib für jeden Wochentag 0 bis 24 Stunden ein, zum Beispiel 7,6 oder 7.6.', target: 'Ziel',
@@ -31,7 +36,7 @@ const de: Record<keyof typeof en, string> = {
   manageProjects: 'Projekte verwalten', manageHelp: 'Umbenennen erhält die gesamte Historie. Archivierte Projekte bleiben in Berichten sichtbar.', createProject: 'Projekt anlegen', newProjectName: 'Neuer Projektname', rename: 'Umbenennen', archive: 'Archivieren', restore: 'Wiederherstellen', noManagedProjects: 'Noch keine Projekte.',
   settingsTitle: 'Einstellungen', settingsIntro: 'Ein paar Vorlieben. Alles bleibt auf diesem Mac.', timing: 'Zeitintervalle', idleThreshold: 'Nach Inaktivität fragen', idleHelp: 'Ab diesem Grenzwert wartet die gesamte Zeit seit deiner letzten Aktivität auf Klärung. Der neue Wert gilt sofort für die laufende Inaktivität.', reminderInterval: 'An die Projektwahl erinnern', reminderHelp: 'Zählt nur aktive Nutzung ohne Erfassung. Arbeit, Pausen, Ruhezustand, Sperre und Inaktivität zählen nicht.', minutes: 'Minuten', saveSettings: 'Einstellungen speichern', saved: 'Einstellungen gespeichert', launchAtLogin: 'timi beim Anmelden öffnen', loginHelp: 'Startet in der Menüleiste, bereit für deine Projektwahl.', loginUnavailable: 'In der verpackten macOS-App verfügbar.', loginApproval: 'Erlaube timi unter Systemeinstellungen → Allgemein → Anmeldeobjekte, um dies zu aktivieren.', privacy: 'Lokal und offline. timi liest nur die Inaktivitätsdauer des Systems; niemals Eingaben oder Informationen über verwendete Apps.', version: 'Version {version} · macOS 13+',
   clarificationTitle: 'Wie soll diese Zeit zählen?', clarificationIdle: 'Du warst nicht an der Tastatur, oder dein Mac war gesperrt oder im Ruhezustand. Ordne die gesamte Zeitspanne zu.', clarificationRecovery: 'Die letzte Sitzung von timi wurde nicht sauber beendet. Kläre die gespeicherte unsichere Zeit einmalig; die Erfassung bleibt gestoppt.', idleContinuing: 'Die Zeitspanne läuft bis zu deiner Entscheidung weiter, auch bei erneuter Inaktivität. Danach läuft das vorherige Projekt weiter, sofern die Erfassung nicht beendet wurde.', fixedContinuing: 'Die Erfassung wurde beendet. Diese Zeitspanne hat ein festes Ende. Die Antwort startet keine neue Erfassung.', recoveryContinuing: 'Nur die gespeicherte unsichere Zeitspanne zählt. Zeit bei geschlossener App wird niemals ergänzt.', workFor: 'Arbeit für {project}', workChoice: 'Als Arbeit erfassen', breakChoice: 'Als Pause erfassen', discardChoice: 'Diese Zeit verwerfen', breakChoiceHelp: 'Eine Pause ohne Projekt', discardChoiceHelp: 'Weder als Arbeit noch als Pause zählen', recoveryProject: 'Projekt für wiederhergestellte Arbeit', recoveryPlaceholder: 'Projekt auswählen oder eingeben', recoveryHelp: 'Bei der Wiederherstellung ist ein anderes Projekt möglich. Ein neuer Name legt ein Projekt an.', intervalFrom: 'Von {date}', intervalTo: 'Bis {date}', awaiting: 'Alle Zeitspannen wurden geklärt.',
-  addTimeTitle: 'Fehlende Zeit ergänzen', editTimeTitle: 'Zeiteintrag bearbeiten', editHelp: 'Alle Änderungen werden gemeinsam gespeichert. Gespeicherte Zeiten und laufende Erfassung dürfen sich nicht überschneiden.', addHelp: 'Ergänze Arbeit oder eine Pause ohne Projekt. Neue Projekte kannst du unter der Wochentabelle anlegen.', segment: 'Zeitraum {number}', split: 'Teilen', removeSegment: 'Entfernen', splitHelp: 'Teilt in der Mitte. Passe vor dem Speichern die gemeinsame Grenze und Zuordnung an.', saveChanges: 'Änderungen speichern', cancel: 'Abbrechen', deleteRecord: 'Eintrag löschen', deleteConfirm: 'Diesen Eintrag endgültig löschen? Seine Zeit wird aus allen Summen entfernt.', confirmDelete: 'Endgültig löschen', keepRecord: 'Eintrag behalten', chooseProject: 'Projekt auswählen', boundaryHelp: 'Ortszeit · minutengenau. Unveränderte Zeitgrenzen bleiben exakt. Versatz: {offset}', ambiguousTime: 'Diese Uhrzeit kommt zweimal vor. Wähle den gewünschten Zeitpunkt.', firstOccurrence: 'Erstes Vorkommen ({offset})', secondOccurrence: 'Zweites Vorkommen ({offset})', invalidDate: 'Gib gültige Zeiten ein. Das Ende muss nach dem Beginn liegen.', invalidProject: 'Wähle für jeden Arbeitszeitraum ein Projekt.', invalidSettings: 'Verwende positive ganze Minuten, die sicher darstellbar sind. Die Einstellungen wurden nicht geändert.', projectNameRequired: 'Gib einen Projektnamen ein.', splitTooShort: 'Dieser Zeitraum ist zum Teilen zu kurz.',
+  addTimeTitle: 'Fehlende Zeit ergänzen', editTimeTitle: 'Zeiteintrag bearbeiten', editHelp: 'Alle Änderungen werden gemeinsam gespeichert. Pausen werden automatisch angepasst. Zeit anderer Projekte wird erst nach Bestätigung überschrieben.', addHelp: 'Ergänze Arbeit oder eine Pause ohne Projekt. Neue Projekte kannst du unter der Wochentabelle anlegen.', segment: 'Zeitraum {number}', split: 'Teilen', removeSegment: 'Entfernen', splitHelp: 'Teilt in der Mitte. Passe vor dem Speichern die gemeinsame Grenze und Zuordnung an.', saveChanges: 'Änderungen speichern', cancel: 'Abbrechen', deleteRecord: 'Eintrag löschen', deleteConfirm: 'Diesen Eintrag endgültig löschen? Seine Zeit wird aus allen Summen entfernt.', confirmDelete: 'Endgültig löschen', keepRecord: 'Eintrag behalten', chooseProject: 'Projekt auswählen', boundaryHelp: 'Ortszeit · minutengenau. Unveränderte Zeitgrenzen bleiben exakt. Versatz: {offset}', ambiguousTime: 'Diese Uhrzeit kommt zweimal vor. Wähle den gewünschten Zeitpunkt.', firstOccurrence: 'Erstes Vorkommen ({offset})', secondOccurrence: 'Zweites Vorkommen ({offset})', invalidDate: 'Gib gültige Zeiten ein. Das Ende muss nach dem Beginn liegen.', invalidProject: 'Wähle für jeden Arbeitszeitraum ein Projekt.', invalidSettings: 'Verwende positive ganze Minuten, die sicher darstellbar sind. Die Einstellungen wurden nicht geändert.', projectNameRequired: 'Gib einen Projektnamen ein.', splitTooShort: 'Dieser Zeitraum ist zum Teilen zu kurz.',
   errorStorage: 'timi konnte die Daten nicht speichern oder lesen. Der vorherige Zustand wurde erhalten. Prüfe freien Speicherplatz und Ordnerzugriff und versuche es erneut.', errorStorageVersion: 'Diese Daten stammen aus einer neueren timi-Version. Sie wurden nicht ersetzt.', errorStorageInvalid: 'Die gespeicherten Daten können nicht sicher gelesen werden. Sie wurden nicht ersetzt.', errorCommand: 'Diese Aktion ist gerade nicht möglich.', errorProjectExists: 'Ein Projekt mit diesem Namen existiert bereits. Wähle einen anderen Namen.', errorInvalidProject: 'Gib ein gültiges Projekt ein oder wähle eines aus.', errorProjectMissing: 'Dieses Projekt wurde nicht gefunden. Aktualisiere die Ansicht und versuche es erneut.', errorPending: 'Kläre die offene Zeitspanne, bevor du Arbeit oder eine Pause startest.', errorOverlap: 'Dieser Zeitraum überschneidet sich mit gespeicherter oder laufender Arbeit oder einer Pause. Passe die Grenzen an; kein Eintrag wurde geändert.', errorRecordMissing: 'Dieser Eintrag existiert nicht mehr. Schließe den Editor und versuche es erneut.', errorClock: 'Die Systemuhr wurde zurückgestellt oder ist ungültig. Prüfe Datum und Uhrzeit und versuche es erneut.', errorGeneric: 'Die Aktion konnte nicht abgeschlossen werden. Bitte versuche es erneut.', errorActivity: 'Die macOS-Inaktivität konnte nicht gelesen werden. Versuche es erneut; timi hat den vorherigen Zustand erhalten.', errorLogin: 'Die macOS-Anmeldeeinstellung konnte nicht aktualisiert werden. Prüfe Systemeinstellungen → Allgemein → Anmeldeobjekte.', errorConflictTime: 'Überschneidung: {start} – {end}.', errorDetailsProject: 'Projekt: {project}.', dismissError: 'Meldung schließen', close: 'Schließen', refresh: 'Aktualisieren', noProject: 'Kein Projekt',
 };
 type TextKey = keyof typeof en;
@@ -115,6 +120,8 @@ function shortDate(ms: number): string { return new Intl.DateTimeFormat(locale, 
 function projectName(id: string | null): string { return state?.projects.find(project => project.id === id)?.name ?? t('noProject'); }
 function brand(): HTMLElement { const node = el('div', 'brand', 'timi'); node.append(el('span', 'brand-dot')); return node; }
 function errorText(error: AppError): string {
+  if (error.code === 'ACTIVE_CHANGED') return t('errorActiveChanged');
+  if (error.code === 'OVERWRITE_REQUIRED') return t('errorOverwriteRequired');
   const map: Record<string, TextKey> = { STORAGE_ERROR: 'errorStorage', STORAGE_VERSION: 'errorStorageVersion', STORAGE_INVALID: 'errorStorageInvalid', INVALID_COMMAND: 'errorCommand', INVALID_SETTINGS: 'invalidSettings', INVALID_PROJECT: 'errorInvalidProject', PROJECT_EXISTS: 'errorProjectExists', PROJECT_NOT_FOUND: 'errorProjectMissing', PENDING_REQUIRED: 'errorPending', INVALID_RANGE: 'invalidDate', OVERLAP: 'errorOverlap', RECORD_NOT_FOUND: 'errorRecordMissing', CLOCK_INVALID: 'errorClock', LOGIN_ERROR: 'errorLogin', ACTIVITY_ERROR: 'errorActivity' };
   let message = t(map[error.code] ?? 'errorGeneric');
   if (error.code === 'OVERLAP' && typeof error.details?.start === 'number' && typeof error.details?.end === 'number') message += ` ${t('errorConflictTime', { start: dateTime(error.details.start), end: dateTime(error.details.end) })}`;
@@ -168,6 +175,7 @@ let entryHint: HTMLElement;
 let todayValue: HTMLElement;
 let statusTitle: HTMLElement;
 let statusDetail: HTMLElement;
+let startTimeButton: HTMLButtonElement;
 let statusMark: HTMLElement;
 let statusPanel: HTMLElement;
 let trackingControls: HTMLElement;
@@ -177,6 +185,7 @@ function buildEntry(): void {
   todayValue = el('div', 'today-value mono'); append(today, todayValue, el('div', 'today-label', t('today'))); append(header, brand(), today);
   statusPanel = el('section', 'status'); statusMark = el('div', 'status-mark'); statusMark.setAttribute('aria-hidden', 'true');
   const statusText = el('div', 'grow'); statusTitle = el('div', 'status-title'); statusDetail = el('div', 'status-detail'); append(statusText, statusTitle, statusDetail);
+  startTimeButton = markAction(button('', openStartEditor, 'quiet start-time-button')); startTimeButton.setAttribute('aria-label', t('editStart')); startTimeButton.title = t('editStart'); statusText.append(startTimeButton);
   trackingControls = el('div', 'tracking-controls'); append(statusPanel, statusMark, statusText, trackingControls);
   reminderPanel = el('section', 'notice reminder'); append(reminderPanel, el('strong', '', t('reminderTitle')), el('p', '', t('reminderText')));
   const reminderButtons = el('div', 'button-row'); append(reminderButtons, markAction(button(t('later'), async () => { if (await send({ type: 'later' })) await nativeAction(window.timi.closeWindow()); })), markAction(button(t('startBreak'), async () => { if (await send({ type: 'pause' })) await nativeAction(window.timi.closeWindow()); }, 'primary'))); reminderPanel.append(reminderButtons);
@@ -216,6 +225,8 @@ function updateEntry(): void {
   else if (state.mode === 'break') { statusTitle.textContent = t('manualBreak'); statusDetail.textContent = `${fmt(state.now - (state.active?.start ?? state.now))} · ${t('break')}`; statusMark.textContent = 'Ⅱ'; }
   else if (state.mode === 'pending') { statusTitle.textContent = t('pending'); statusDetail.textContent = t('pendingDetail'); statusMark.textContent = '?'; }
   else { statusTitle.textContent = t('untracked'); statusDetail.textContent = t('untrackedDetail'); statusMark.textContent = '○'; }
+  startTimeButton.hidden = state.mode !== 'work';
+  if (state.active) startTimeButton.textContent = `${t('runningSince', { date: dateTime(state.active.start) })} ✎`;
   const controlsSignature = `${state.mode}:${state.resumeProjectId}`;
   if (controlsSignature !== entryControlSignature) {
     entryControlSignature = controlsSignature; trackingControls.replaceChildren();
@@ -314,6 +325,7 @@ function renderRecords(records: TimeRecord[], showActive: boolean, showPending: 
   function row(item: Pick<TimeRecord, 'kind' | 'start' | 'projectId'> & { end: number }, subtitle: string, saved?: TimeRecord, pending = false): void {
     const tr = el('tr'); const kindCell = el('td'); kindCell.append(el('span', `kind-badge ${pending ? 'pending' : item.kind}`, t(pending ? 'unresolved' : item.kind))); const projectCell = el('td', 'project-name', item.kind === 'work' || pending ? projectName(item.projectId) : '—'); projectCell.append(el('div', 'record-source', subtitle));
     const startCell = el('td', 'mono', dateTime(item.start)); const endCell = el('td', 'mono', saved || state.pending?.end && pending ? dateTime(item.end) : t('live')); const duration = el('td', 'number', pending ? '—' : fmt(item.end - item.start)); const action = el('td'); if (saved) action.append(button(t('edit'), () => openEditor(saved)));
+    if (!saved && !pending && item.kind === 'work') action.append(markAction(button(t('editStart'), openStartEditor)));
     append(tr, kindCell, projectCell, startCell, endCell, duration, action); body.append(tr);
   }
   if (showPending && state.pending) { const pending = state.pending; row({ kind: 'work', start: pending.start, end: pending.end ?? state.now, projectId: pending.projectId }, t('unresolved'), undefined, true); }
@@ -485,14 +497,87 @@ function parseLocalInput(value: string, original: number, occurrence?: HTMLSelec
   return possible.includes(original) ? original : possible[0] ?? NaN;
 }
 function utcOffset(ms: number): string { const minutes = -new Date(ms).getTimezoneOffset(); return `UTC${minutes >= 0 ? '+' : '−'}${String(Math.floor(Math.abs(minutes) / 60)).padStart(2, '0')}:${String(Math.abs(minutes) % 60).padStart(2, '0')}`; }
+function openStartEditor(): void {
+  const active = state.active;
+  if (state.mode !== 'work' || !active || !active.projectId) return;
+  editorDialog?.close(); editorDialog?.remove();
+  const dialog = el('dialog', 'start-editor-dialog'); editorDialog = dialog; dialog.setAttribute('aria-labelledby', 'start-editor-title');
+  const form = el('form', 'editor'); form.noValidate = true;
+  const header = el('div', 'editor-header'); const title = el('h2', '', t('editStart')); title.id = 'start-editor-title';
+  const close = button('×', closeEditor, 'quiet icon'); close.setAttribute('aria-label', t('close')); append(header, title, close);
+  const input = el('input'); input.type = 'datetime-local'; input.step = '60'; input.required = true; input.value = localMinuteInput(active.start);
+  const field = labelField(t('start'), input); const occurrence = el('select'); occurrence.setAttribute('aria-label', t('ambiguousTime'));
+  const ambiguity = el('div', 'ambiguity'); append(ambiguity, el('p', 'field-help', t('ambiguousTime')), occurrence); field.append(ambiguity);
+  const preview = el('p', 'field-help'); const error = el('p', 'editor-error'); error.setAttribute('role', 'alert'); editorAlert = error;
+  const confirmation = el('section', 'delete-confirm'); confirmation.hidden = true; confirmation.setAttribute('aria-label', t('overwriteTitle'));
+  const save = button(t('saveChanges'), () => undefined, 'primary'); save.type = 'submit';
+  const actions = el('div', 'button-row start-editor-actions'); append(actions, button(t('cancel'), closeEditor), save);
+  function closeEditor(): void { dialog.close(); dialog.remove(); if (editorDialog === dialog) { editorDialog = null; editorAlert = null; } }
+  dialog.addEventListener('cancel', event => { event.preventDefault(); closeEditor(); });
+  function updatePreview(): void {
+    confirmation.hidden = true; save.hidden = false; error.textContent = '';
+    const start = parseLocalInput(input.value, active!.start, occurrence);
+    preview.textContent = Number.isFinite(start) && start <= state.now ? `${projectName(active!.projectId)} · ${t('duration')}: ${fmt(state.now - start)} · ${utcOffset(start)}` : t('invalidStart');
+  }
+  function updateOccurrence(): void {
+    const candidates = correctionLocalTimes(input.value, active!.start), prior = occurrence.value ? Number(occurrence.value) : active!.start;
+    const selected = candidates.includes(prior) ? prior : candidates.includes(active!.start) ? active!.start : candidates[0];
+    occurrence.replaceChildren(...candidates.map((candidate, index) => { const option = el('option', '', t(index === 0 ? 'firstOccurrence' : 'secondOccurrence', { offset: utcOffset(candidate) })); option.value = String(candidate); return option; }));
+    if (selected !== undefined) occurrence.value = String(selected); ambiguity.hidden = candidates.length < 2; updatePreview();
+  }
+  input.addEventListener('input', updateOccurrence); occurrence.addEventListener('change', updatePreview);
+  async function persist(command: Extract<Command, { type: 'adjustStart' }>): Promise<void> {
+    if (busy) return;
+    save.disabled = true; input.disabled = true; occurrence.disabled = true;
+    for (const control of confirmation.querySelectorAll('button')) control.disabled = true;
+    if (await send(command)) closeEditor();
+    else { confirmation.hidden = true; save.hidden = false; save.disabled = false; input.disabled = false; occurrence.disabled = false; }
+  }
+  form.addEventListener('submit', async event => {
+    event.preventDefault(); if (busy) return;
+    const start = parseLocalInput(input.value, active.start, occurrence);
+    if (!Number.isFinite(start)) { error.textContent = t('invalidStart'); return; }
+    // Refresh the review from the source of truth; the command checks it again inside the transaction.
+    busy = true; save.disabled = true; input.disabled = true; occurrence.disabled = true; updateBusy();
+    const result = await safe(window.timi.snapshot());
+    busy = false; save.disabled = false; input.disabled = false; occurrence.disabled = false; updateBusy();
+    if (!dialog.open) return;
+    if (!result.ok) { showError(result.error); return; }
+    const latest = result.value;
+    if (latest.mode !== 'work' || latest.active?.start !== active.start || latest.active.projectId !== active.projectId) { error.textContent = t('errorActiveChanged'); return; }
+    if (start > latest.now) { error.textContent = t('invalidStart'); return; }
+    error.textContent = '';
+    const conflicts = latest.records.filter(record => record.end > record.start && record.start < active.start && record.end > start && record.kind === 'work' && record.projectId !== active.projectId);
+    const command: Extract<Command, { type: 'adjustStart' }> = { type: 'adjustStart', start, expectedStart: active.start, projectId: active.projectId!, overwriteIds: conflicts.map(record => record.id) };
+    if (!conflicts.length) { await persist(command); return; }
+    const list = el('ul', 'overwrite-records');
+    for (const record of conflicts) list.append(el('li', '', `${projectName(record.projectId)} · ${dateTime(Math.max(start, record.start))} – ${dateTime(Math.min(active.start, record.end))}`));
+    confirmation.replaceChildren(el('strong', '', t('overwriteTitle')), el('p', '', t('overwriteHelp', { project: projectName(active.projectId) })), list, button(t('confirmOverwrite'), () => persist(command), 'danger'));
+    confirmation.hidden = false;
+    save.hidden = true;
+    confirmation.querySelector('button')?.focus();
+  });
+  append(form, header, el('p', 'editor-intro', t('editStartHelp')), field, preview, error, confirmation, actions);
+  dialog.append(form); content.append(dialog); updateOccurrence(); dialog.showModal(); input.focus();
+}
 function openEditor(record?: TimeRecord): void {
   editorDialog?.close(); editorDialog?.remove();
   const now = Math.floor(state.now / 60_000) * 60_000;
   const segments: SegmentState[] = [{ record: record ? { start: record.start, end: record.end, kind: record.kind, projectId: record.projectId } : { start: now - 3600_000, end: now, kind: 'work', projectId: state.projects.find(project => !project.archived)?.id ?? null } }];
   const dialog = el('dialog'); editorDialog = dialog; dialog.setAttribute('aria-labelledby', 'editor-title'); const editor = el('form', 'editor'); editor.noValidate = true; const header = el('div', 'editor-header'); const title = el('h2', '', t(record ? 'editTimeTitle' : 'addTimeTitle')); title.id = 'editor-title'; const close = button('×', closeEditor, 'quiet icon'); close.setAttribute('aria-label', t('close')); append(header, title, close);
-  const intro = el('p', 'editor-intro', t(record ? 'editHelp' : 'addHelp')); const segmentList = el('div', 'editor-segments'); const editorError = el('p', 'editor-error'); editorAlert = editorError; editorError.setAttribute('role', 'alert');
+  const intro = el('p', 'editor-intro', t(record ? 'editHelp' : 'addHelp')); const segmentList = el('fieldset', 'editor-segments'); const editorError = el('p', 'editor-error'); editorAlert = editorError; editorError.setAttribute('role', 'alert');
   const actions = el('div', 'editor-actions'); const left = el('div'); const right = el('div', 'button-row'); const save = button(t('saveChanges'), () => undefined, 'primary'); save.type = 'submit'; append(right, button(t('cancel'), closeEditor), save); append(actions, left, right);
   const deleteConfirm = el('div', 'delete-confirm'); deleteConfirm.hidden = true; deleteConfirm.append(el('p', '', t('deleteConfirm'))); const deleteButtons = el('div', 'button-row');
+  const overwriteConfirm = el('section', 'delete-confirm'); overwriteConfirm.hidden = true; overwriteConfirm.setAttribute('aria-label', t('overwriteTitle'));
+  function resetReview(): void { overwriteConfirm.hidden = true; save.hidden = false; }
+  editor.addEventListener('input', resetReview); editor.addEventListener('change', resetReview);
+  async function persist(command: Extract<Command, { type: 'correct' }>): Promise<void> {
+    if (busy) return;
+    segmentList.disabled = true; save.disabled = true;
+    for (const control of overwriteConfirm.querySelectorAll('button')) control.disabled = true;
+    if (await send(command)) closeEditor();
+    else { segmentList.disabled = false; save.disabled = false; resetReview(); }
+  }
   if (record) {
     left.append(button(t('deleteRecord'), () => { deleteConfirm.hidden = false; }, 'quiet danger'));
     append(deleteButtons, button(t('confirmDelete'), async () => { if (busy) return; save.disabled = true; if (await send({ type: 'correct', removeIds: [record.id], records: [] })) closeEditor(); else save.disabled = false; }, 'danger'), button(t('keepRecord'), () => { deleteConfirm.hidden = true; })); deleteConfirm.append(deleteButtons);
@@ -512,10 +597,11 @@ function openEditor(record?: TimeRecord): void {
   }
   function preserve(): boolean { const records = collect(); if (!records) return false; records.forEach((item, index) => { segments[index].record = item; }); return true; }
   function renderSegments(): void {
+    resetReview();
     segmentList.replaceChildren(); segments.forEach((segment, index) => {
       const card = el('section', 'segment'); const title = el('div', 'segment-title'); title.append(el('strong', '', t('segment', { number: index + 1 }))); const controls = el('div', 'button-row');
       const split = button(t('split'), () => { if (!preserve()) return; const item = segment.record; const midpoint = item.start + Math.floor((item.end - item.start) / 2); if (midpoint <= item.start || midpoint >= item.end) { editorError.textContent = t('splitTooShort'); return; } segments.splice(segments.indexOf(segment), 1, { record: { ...item, end: midpoint } }, { record: { ...item, start: midpoint } }); editorError.textContent = ''; renderSegments(); }); split.title = t('splitHelp'); controls.append(split);
-      if (segments.length > 1) { const remove = button(t('removeSegment'), () => { segments.splice(segments.indexOf(segment), 1); card.remove(); [...segmentList.children].forEach((node, position) => { const heading = node.querySelector('.segment-title strong'); if (heading) heading.textContent = t('segment', { number: position + 1 }); const removeButton = node.querySelector<HTMLButtonElement>('[data-remove]'); if (removeButton) removeButton.hidden = segments.length < 2; }); }, 'quiet'); remove.dataset.remove = 'true'; controls.append(remove); } title.append(controls);
+      if (segments.length > 1) { const remove = button(t('removeSegment'), () => { segments.splice(segments.indexOf(segment), 1); resetReview(); card.remove(); [...segmentList.children].forEach((node, position) => { const heading = node.querySelector('.segment-title strong'); if (heading) heading.textContent = t('segment', { number: position + 1 }); const removeButton = node.querySelector<HTMLButtonElement>('[data-remove]'); if (removeButton) removeButton.hidden = segments.length < 2; }); }, 'quiet'); remove.dataset.remove = 'true'; controls.append(remove); } title.append(controls);
       const grid = el('div', 'segment-grid'); const start = el('input'); start.type = 'datetime-local'; start.step = '60'; start.required = true; start.value = localMinuteInput(segment.record.start); const end = el('input'); end.type = 'datetime-local'; end.step = '60'; end.required = true; end.value = localMinuteInput(segment.record.end); segment.startInput = start; segment.endInput = end;
       const kind = el('select'); kind.dataset.field = 'kind'; for (const value of ['work', 'break'] as const) { const option = el('option', '', t(value)); option.value = value; kind.append(option); } kind.value = segment.record.kind; segment.kindInput = kind;
       const project = el('select'); project.dataset.field = 'project'; const blank = el('option', '', t('chooseProject')); blank.value = ''; project.append(blank); for (const item of state.projects) { const option = el('option', '', `${item.name}${item.archived ? ` (${t('archived')})` : ''}`); option.value = item.id; project.append(option); } project.value = segment.record.projectId ?? ''; project.disabled = kind.value === 'break'; segment.projectInput = project;
@@ -537,8 +623,36 @@ function openEditor(record?: TimeRecord): void {
       start.addEventListener('input', updateBoundaries); end.addEventListener('input', updateBoundaries); startOccurrence.addEventListener('change', updateDuration); endOccurrence.addEventListener('change', updateDuration); updateBoundaries(); append(card, title, grid, duration, boundary); segmentList.append(card);
     });
   }
-  editor.addEventListener('submit', async event => { event.preventDefault(); const records = collect(); if (!records || busy) return; editorError.textContent = ''; save.disabled = true; const success = await send({ type: 'correct', removeIds: record ? [record.id] : [], records }); if (success) closeEditor(); else { editorError.textContent = errors.textContent?.replace(/×$/, '') ?? t('errorGeneric'); save.disabled = false; } });
-  append(editor, header, intro, segmentList, editorError, deleteConfirm, actions); dialog.append(editor); content.append(dialog); renderSegments(); dialog.showModal(); segments[0].startInput?.focus();
+  editor.addEventListener('submit', async event => {
+    event.preventDefault(); if (busy) return;
+    const records = collect(); if (!records) return;
+    editorError.textContent = ''; resetReview();
+    busy = true; segmentList.disabled = true; save.disabled = true; updateBusy();
+    const result = await safe(window.timi.snapshot());
+    busy = false; segmentList.disabled = false; save.disabled = false; updateBusy();
+    if (!dialog.open) return;
+    if (!result.ok) { showError(result.error); return; }
+    const latest = result.value;
+    const savedConflicts = latest.records.filter(item => item.id !== record?.id && records.some(input => needsOverwrite(item, input)));
+    const activeInput = latest.active ? { ...latest.active, end: Infinity } : null;
+    const activeConflict = activeInput && records.some(input => needsOverwrite(activeInput, input));
+    const command: Extract<Command, { type: 'correct' }> = { type: 'correct', removeIds: record ? [record.id] : [], records,
+      overwriteIds: savedConflicts.map(item => item.id), ...(activeConflict ? { overwriteActive: latest.active! } : {}) };
+    if (!savedConflicts.length && !activeConflict) { await persist(command); return; }
+    const list = el('ul', 'overwrite-records');
+    for (const item of [...savedConflicts, ...(activeConflict ? [activeInput!] : [])]) {
+      for (const input of records) {
+        if (!needsOverwrite(item, input)) continue;
+        const range = overlapRange(item, input)!;
+        list.append(el('li', '', `${projectName(item.projectId)}${item === activeInput ? ` (${t('live')})` : ''} → ${input.kind === 'break' ? t('break') : projectName(input.projectId)} · ${dateTime(range.start)} – ${dateTime(range.end)}`));
+      }
+    }
+    overwriteConfirm.replaceChildren(el('strong', '', t('overwriteTitle')), el('p', '', t('overwriteCorrectionHelp')), list,
+      button(t('confirmOverwrite'), () => persist(command), 'danger'));
+    overwriteConfirm.hidden = false; save.hidden = true; deleteConfirm.hidden = true;
+    overwriteConfirm.querySelector('button')?.focus();
+  });
+  append(editor, header, intro, segmentList, editorError, deleteConfirm, overwriteConfirm, actions); dialog.append(editor); content.append(dialog); renderSegments(); dialog.showModal(); segments[0].startInput?.focus();
 }
 
 document.addEventListener('keydown', event => {
