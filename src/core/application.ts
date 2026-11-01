@@ -32,17 +32,21 @@ export class TrackingApplication {
       }
       if (!previous.cleanExit && previous.active) {
         const active = previous.active;
-        const end = Math.max(active.start, previous.checkpointAt);
-        let start = active.start;
-        if (active.kind === 'work') {
-          const certainEnd = Math.max(active.start, Math.min(end, previous.lastActivity));
-          this.appendRecord(next, active.start, certainEnd, 'work', active.projectId, 'tracked');
-          start = certainEnd;
-        }
-        if (end > start) {
-          const recovery: PendingPeriod = { id: randomUUID(), start, end, projectId: active.projectId, reason: 'recovery', resume: false };
-          if (!runtime.pending) runtime.pending = recovery;
-          else runtime.pendingQueue.push(recovery);
+        const fragments = this.unconfirmedWork(next, active, previous.lastActivity);
+        const fragmentIds = new Set(fragments.map(record => record.id));
+        next.records = next.records.filter(record => !fragmentIds.has(record.id));
+        for (const period of [...fragments, { ...active, end: Math.max(active.start, previous.checkpointAt) }]) {
+          let start = period.start;
+          if (period.kind === 'work') {
+            const certainEnd = Math.max(start, Math.min(period.end, previous.lastActivity));
+            this.appendRecord(next, start, certainEnd, 'work', period.projectId, 'tracked');
+            start = certainEnd;
+          }
+          if (period.end > start) {
+            const recovery: PendingPeriod = { id: randomUUID(), start, end: period.end, projectId: period.projectId, reason: 'recovery', resume: false };
+            if (!runtime.pending) runtime.pending = recovery;
+            else runtime.pendingQueue.push(recovery);
+          }
         }
       }
     }
@@ -240,7 +244,7 @@ export class TrackingApplication {
     // If the timer missed the threshold itself, a returning input still reveals the completed
     // inactivity streak. Classify it before advancing the last-activity anchor.
     if (hadNewActivity && runtime.active?.kind === 'work'
-      && lastActivity - Math.max(runtime.active.start, previousActivity) >= threshold) {
+      && lastActivity - this.idleStart(draft) >= threshold) {
       this.detectIdle(draft, lastActivity, false);
     }
     const gapWasInactive = hadNewActivity && lastActivity - Math.max(previousActivity, runtime.reminderAnchor) >= threshold;
@@ -272,17 +276,45 @@ export class TrackingApplication {
   private detectIdle(draft: State, now: number, absenceBegan: boolean): void {
     const runtime = draft.runtime;
     if (runtime.active?.kind !== 'work' || runtime.pending) return;
-    const idleStart = Math.max(runtime.active.start, runtime.lastActivity);
+    const fragments = this.unconfirmedWork(draft, runtime.active, runtime.lastActivity);
+    const idleStart = this.idleStart(draft);
     const thresholdReached = now - idleStart >= draft.settings.idleMinutes * 60_000;
     if (!thresholdReached && !absenceBegan && !runtime.locked && !runtime.sleeping) return;
     const start = thresholdReached ? idleStart : now;
     const projectId = runtime.active.projectId;
+    const pending: PendingPeriod[] = [];
+    if (thresholdReached) {
+      const fragmentIds = new Set(fragments.map(record => record.id));
+      draft.records = draft.records.filter(record => !fragmentIds.has(record.id));
+      for (const fragment of fragments) {
+        this.appendRecord(draft, fragment.start, Math.min(fragment.end, start), 'work', projectId, 'tracked');
+        pending.push({ id: randomUUID(), start: Math.max(fragment.start, start), end: fragment.end, projectId, reason: 'idle', resume: false });
+      }
+    }
     this.appendRecord(draft, runtime.active.start, start, 'work', projectId, 'tracked');
+    pending.push({ id: randomUUID(), start: Math.max(runtime.active.start, start), end: null, projectId, reason: 'idle', resume: true });
     runtime.active = null;
-    runtime.pending = { id: randomUUID(), start, end: null, projectId, reason: 'idle', resume: true };
+    runtime.pending = pending.shift()!;
+    runtime.pendingQueue.push(...pending);
     runtime.resumeProjectId = null;
     runtime.awaitingReturn = thresholdReached && !absenceBegan;
     runtime.reminderDue = false;
+  }
+
+  /** Only splitting an active interval can leave tracked work after its last activity anchor.
+   * Manual corrections are explicit decisions; untouched tracked fragments remain reversible
+   * until native input confirms them, the idle threshold classifies them, or the app recovers. */
+  private unconfirmedWork(draft: PersistedState, active: ActivePeriod, lastActivity: number): TimeRecord[] {
+    if (active.kind !== 'work' || lastActivity >= active.start) return [];
+    return draft.records.filter(record => record.kind === 'work' && record.source === 'tracked'
+      && record.projectId === active.projectId && record.end > lastActivity && record.end <= active.start && record.end > record.start)
+      .sort((a, b) => a.start - b.start);
+  }
+
+  private idleStart(draft: State): number {
+    const { active, lastActivity } = draft.runtime;
+    const earliest = this.unconfirmedWork(draft, active!, lastActivity)[0]?.start ?? active!.start;
+    return Math.max(earliest, lastActivity);
   }
 
   private updateReminderDue(draft: State): void {
@@ -340,10 +372,11 @@ export class TrackingApplication {
 
   private stop(draft: State, now: number): void {
     this.finishActive(draft, now);
-    if (draft.runtime.pending) {
-      if (now < draft.runtime.pending.start) throw new AppFailure('CLOCK_INVALID');
-      draft.runtime.pending.end ??= now;
-      draft.runtime.pending.resume = false;
+    for (const pending of [draft.runtime.pending, ...draft.runtime.pendingQueue]) {
+      if (!pending) continue;
+      if (now < pending.start) throw new AppFailure('CLOCK_INVALID');
+      pending.end ??= now;
+      pending.resume = false;
     }
     draft.runtime.resumeProjectId = null;
     this.resetReminder(draft.runtime, now);

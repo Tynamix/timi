@@ -1090,3 +1090,171 @@ test('failed editor overwrite rolls back saved splits and active changes, retrie
   assert.equal(recovered.records[1]!.end, BASE + 2 * MINUTE);
   assert.equal(recovered.week.workTotal, HOUR + 2 * MINUTE);
 });
+
+test('editing ongoing work preserves the whole unconfirmed idle streak around explicit corrections', t => {
+  const f = fixture(t);
+  const projectId = execute(f.app, { type: 'start', name: 'Alpha' }).active!.projectId!;
+  f.advance(4 * MINUTE);
+  sample(f.app, 4 * MINUTE);
+  execute(f.app, { type: 'correct', removeIds: [], overwriteIds: [], records: [
+    { start: BASE + 2 * MINUTE, end: BASE + 3 * MINUTE, kind: 'work', projectId },
+  ] });
+  f.advance(MINUTE);
+  sample(f.app, 5 * MINUTE);
+  let state = f.app.getSnapshot();
+  assert.equal(state.mode, 'pending');
+  assert.equal(state.pending!.start, BASE);
+  assert.equal(state.pending!.end, BASE + 2 * MINUTE);
+  assert.equal(state.todayMs, MINUTE);
+  state = execute(f.app, { type: 'resolve', choice: 'break' });
+  assert.equal(state.pending!.start, BASE + 3 * MINUTE);
+  assert.equal(state.pending!.end, null);
+  assert.equal(state.active, null);
+  f.advance(MINUTE);
+  state = execute(f.app, { type: 'resolve', choice: 'break' });
+  assert.equal(state.mode, 'work');
+  assert.equal(state.active!.start, BASE + 6 * MINUTE);
+  assert.equal(state.todayMs, MINUTE);
+  assert.equal(state.week.breakTotal, 5 * MINUTE);
+});
+
+test('split work still detects an unsampled idle streak when native activity returns', t => {
+  const f = fixture(t);
+  const projectId = execute(f.app, { type: 'start', name: 'Alpha' }).active!.projectId!;
+  f.advance(4 * MINUTE);
+  sample(f.app, 4 * MINUTE);
+  execute(f.app, { type: 'correct', removeIds: [], overwriteIds: [], records: [
+    { start: BASE + 2 * MINUTE, end: BASE + 3 * MINUTE, kind: 'work', projectId },
+  ] });
+  f.advance(2 * MINUTE);
+  sample(f.app);
+  const state = f.app.getSnapshot();
+  assert.equal(state.pending!.start, BASE);
+  assert.equal(state.pending!.end, BASE + 2 * MINUTE);
+  assert.equal(state.canPresent, true);
+  assert.equal(state.todayMs, MINUTE);
+  assert.equal(f.store.load().runtime!.pendingQueue[0]!.start, BASE + 3 * MINUTE);
+});
+
+test('split work keeps exact confirmed prefixes and multiple unresolved fragments after further corrections', t => {
+  const f = fixture(t);
+  const projectId = execute(f.app, { type: 'start', name: 'Alpha' }).active!.projectId!;
+  f.advance(30_123);
+  sample(f.app);
+  const activity = f.now;
+  f.setTime(BASE + 4 * MINUTE);
+  sample(f.app, f.now - activity);
+  let state = execute(f.app, { type: 'correct', removeIds: [], overwriteIds: [], records: [
+    { start: BASE + 2 * MINUTE + 123, end: BASE + 3 * MINUTE + 456, kind: 'work', projectId },
+    { start: BASE + 210_789, end: BASE + 240_000, kind: 'work', projectId },
+  ] });
+  const original = state.records.find(record => record.source === 'tracked')!;
+  state = execute(f.app, { type: 'correct', removeIds: [], overwriteIds: [], records: [
+    { start: BASE + MINUTE, end: BASE + 90_000, kind: 'work', projectId },
+  ] });
+  assert.equal(state.records.some(record => record.id === original.id), false);
+  f.setTime(activity + 5 * MINUTE);
+  sample(f.app, 5 * MINUTE);
+  const periods = [f.app.getSnapshot().pending!, ...f.store.load().runtime!.pendingQueue];
+  assert.deepEqual(periods.map(period => [period.start, period.end]), [
+    [activity, BASE + MINUTE], [BASE + 90_000, BASE + 2 * MINUTE + 123],
+    [BASE + 3 * MINUTE + 456, BASE + 210_789], [BASE + 240_000, null],
+  ]);
+  assert.equal(f.app.getSnapshot().todayMs, 30_123 + 30_000 + 60_333 + 29_211);
+});
+
+test('native input before the idle threshold confirms split work without a later clarification for that prefix', t => {
+  const f = fixture(t);
+  const projectId = execute(f.app, { type: 'start', name: 'Alpha' }).active!.projectId!;
+  f.advance(4 * MINUTE);
+  sample(f.app, 4 * MINUTE);
+  execute(f.app, { type: 'correct', removeIds: [], overwriteIds: [], records: [
+    { start: BASE + 2 * MINUTE, end: BASE + 3 * MINUTE, kind: 'work', projectId },
+  ] });
+  f.advance(30_000);
+  sample(f.app);
+  f.advance(5 * MINUTE);
+  sample(f.app, 5 * MINUTE);
+  const state = f.app.getSnapshot();
+  assert.equal(state.pending!.start, BASE + 270_000);
+  assert.equal(state.todayMs, 270_000);
+  assert.equal(f.store.load().runtime!.pendingQueue.length, 0);
+});
+
+test('Stop fixes every split idle fragment and never resumes recording after clarification', t => {
+  const f = fixture(t);
+  const projectId = execute(f.app, { type: 'start', name: 'Alpha' }).active!.projectId!;
+  f.advance(4 * MINUTE);
+  sample(f.app, 4 * MINUTE);
+  execute(f.app, { type: 'correct', removeIds: [], overwriteIds: [], records: [
+    { start: BASE + 2 * MINUTE, end: BASE + 3 * MINUTE, kind: 'work', projectId },
+  ] });
+  f.advance(MINUTE);
+  sample(f.app, 5 * MINUTE);
+  f.advance(MINUTE);
+  execute(f.app, { type: 'stop' });
+  const queue = f.store.load().runtime!.pendingQueue;
+  assert.equal(queue[0]!.end, BASE + 6 * MINUTE);
+  assert.equal(queue[0]!.resume, false);
+  f.advance(MINUTE);
+  execute(f.app, { type: 'resolve', choice: 'discard' });
+  const state = execute(f.app, { type: 'resolve', choice: 'break' });
+  assert.equal(state.mode, 'untracked');
+  assert.equal(state.todayMs, MINUTE);
+  assert.equal(state.week.breakTotal, 3 * MINUTE);
+});
+
+test('a failed split idle classification rolls back SQLite and replays the original fragments exactly once', t => {
+  const f = fixture(t);
+  const projectId = execute(f.app, { type: 'start', name: 'Alpha' }).active!.projectId!;
+  f.advance(4 * MINUTE);
+  sample(f.app, 4 * MINUTE);
+  execute(f.app, { type: 'correct', removeIds: [], overwriteIds: [], records: [
+    { start: BASE + 2 * MINUTE, end: BASE + 3 * MINUTE, kind: 'work', projectId },
+  ] });
+  const durable = f.store.load();
+  f.advance(MINUTE);
+  const before = f.app.getSnapshot();
+  const writeState = f.store.writeState.bind(f.store);
+  f.store.writeState = (...args) => { writeState(...args); throw new Error('failed after SQLite changes'); };
+  assert.throws(() => sample(f.app, 5 * MINUTE));
+  assert.deepEqual(f.app.getSnapshot(), before);
+  assert.deepEqual(f.store.load(), durable);
+  f.store.writeState = writeState;
+  sample(f.app, 5 * MINUTE);
+  const state = f.app.getSnapshot();
+  assert.equal(state.pending!.start, BASE);
+  assert.equal(state.pending!.end, BASE + 2 * MINUTE);
+  assert.equal(f.store.load().runtime!.pendingQueue.length, 1);
+  assert.equal(state.records.length, 1);
+});
+
+test('crash recovery includes unconfirmed split prefixes only through the last durable checkpoint', t => {
+  const f = fixture(t);
+  const projectId = execute(f.app, { type: 'start', name: 'Alpha' }).active!.projectId!;
+  f.advance(4 * MINUTE);
+  sample(f.app, 4 * MINUTE);
+  execute(f.app, { type: 'correct', removeIds: [], overwriteIds: [], records: [
+    { start: BASE + 2 * MINUTE, end: BASE + 3 * MINUTE, kind: 'work', projectId },
+  ] });
+  f.advance(30_000);
+  sample(f.app); // Unsaved activity must not confirm the prefix after a crash.
+  f.store.close();
+  f.advance(HOUR);
+  const reopened = f.open();
+  let state = reopened.app.getSnapshot();
+  assert.equal(state.mode, 'pending');
+  assert.equal(state.pending!.reason, 'recovery');
+  assert.equal(state.pending!.start, BASE);
+  assert.equal(state.pending!.end, BASE + 2 * MINUTE);
+  assert.equal(state.todayMs, MINUTE);
+  const tail = reopened.store.load().runtime!.pendingQueue[0]!;
+  assert.equal(tail.start, BASE + 3 * MINUTE);
+  assert.equal(tail.end, BASE + 4 * MINUTE);
+  assert.equal(tail.resume, false);
+  execute(reopened.app, { type: 'resolve', choice: 'break' });
+  state = execute(reopened.app, { type: 'resolve', choice: 'break' });
+  assert.equal(state.mode, 'untracked');
+  assert.equal(state.todayMs, MINUTE);
+  assert.equal(state.week.breakTotal, 3 * MINUTE);
+});
