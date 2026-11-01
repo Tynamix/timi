@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 
 const command = (file, args, options = {}) => execFileSync(file, args, { stdio: 'inherit', ...options });
 
@@ -40,7 +41,23 @@ export async function verifySigning(environment, run = command) {
   }
 }
 
-function notarize(archive, target, signing, run) {
+async function runStapler(action, target, run, wait) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      run('xcrun', ['stapler', action, target]);
+      return;
+    } catch (error) {
+      // EX_NOHOST also covers unexpected ticket-service responses and lost connections.
+      // Retry only ticket retrieval/validation, after notarization was confirmed Accepted.
+      if (error.status !== 68 || attempt >= 4) throw error;
+      const milliseconds = 10_000 * 2 ** (attempt - 1);
+      console.warn(`[notarization] stapler ${action} for ${basename(target)} returned 68; retry ${attempt}/3 in ${milliseconds / 1000}s...`);
+      await wait(milliseconds);
+    }
+  }
+}
+
+async function notarize(archive, target, signing, run, wait) {
   const credentials = ['--keychain-profile', 'timi-notarization', '--keychain', signing.keychain];
   console.log(`[notarization] Uploading ${basename(archive)} to Apple...`);
   const submission = JSON.parse(run('xcrun', [
@@ -66,11 +83,11 @@ function notarize(archive, target, signing, run) {
     throw new Error(`Apple notarization ${result.id} was not accepted: ${result.status}.`);
   }
   console.log(`[notarization] Stapling and validating the ticket for ${basename(target)}...`);
-  run('xcrun', ['stapler', 'staple', target]);
-  run('xcrun', ['stapler', 'validate', target]);
+  await runStapler('staple', target, run, wait);
+  await runStapler('validate', target, run, wait);
 }
 
-export async function createDmg({ appPath, outputPath, staging, signing }, run = command) {
+export async function createDmg({ appPath, outputPath, staging, signing }, run = command, wait = delay) {
   console.log('[package] Verifying the application signature...');
   run('codesign', ['--verify', '--deep', '--strict', appPath]);
   if (signing) {
@@ -78,7 +95,7 @@ export async function createDmg({ appPath, outputPath, staging, signing }, run =
     const archive = join(staging, 'notarization.zip');
     console.log('[notarization] Creating the internal app submission archive...');
     run('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', appPath, archive]);
-    notarize(archive, appPath, signing, run);
+    await notarize(archive, appPath, signing, run, wait);
     run('codesign', ['--verify', '--deep', '--strict', appPath]);
     run('spctl', ['--assess', '--type', 'execute', '--verbose=2', appPath]);
   }
@@ -94,7 +111,7 @@ export async function createDmg({ appPath, outputPath, staging, signing }, run =
   if (signing) {
     console.log('[package] Signing the DMG with Developer ID...');
     run('codesign', ['--force', '--sign', signing.identity, '--keychain', signing.keychain, '--timestamp', image]);
-    notarize(image, image, signing, run);
+    await notarize(image, image, signing, run, wait);
     run('codesign', ['--verify', '--strict', image]);
     run('spctl', ['--assess', '--type', 'open', '--context', 'context:primary-signature', '--verbose=2', image]);
   }

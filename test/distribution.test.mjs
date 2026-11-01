@@ -208,6 +208,65 @@ test('signed DMGs notarize and staple the app before copying, then sign, notariz
   assert.equal(messages.at(-1), `[package] DMG ready: ${options.outputPath}`);
 });
 
+test('ticket-service failures retry stapling and validation for the app and DMG without resubmitting', async t => {
+  for (const extension of ['.app', '.dmg']) {
+    for (const action of ['staple', 'validate']) {
+      await t.test(`${extension} ${action}`, async t => {
+        const options = { ...await fixture(t), signing };
+        const { calls, run } = commands();
+        const waits = [];
+        const warnings = [];
+        t.mock.method(console, 'warn', message => warnings.push(message));
+        let attempts = 0;
+        await createDmg(options, (command, args) => {
+          const result = run(command, args);
+          if (command === 'xcrun' && args[0] === 'stapler' && args[1] === action && args[2].endsWith(extension)) {
+            if (++attempts <= 2) throw Object.assign(new Error('ticket connection lost'), { status: 68 });
+          }
+          return result;
+        }, async milliseconds => { waits.push(milliseconds); });
+        assert.equal(attempts, 3);
+        assert.deepEqual(waits, [10_000, 20_000]);
+        assert.equal(warnings.length, 2);
+        assert.ok(warnings.every(message => message.includes(`stapler ${action}`) && message.includes('returned 68')));
+        assert.equal(calls.filter(call => call[1] === 'notarytool' && call[2] === 'submit').length, 2);
+        assert.equal(calls.filter(call => call[0] === 'spctl').length, 2);
+        assert.equal(await readFile(options.outputPath, 'utf8'), 'new disk image');
+      });
+    }
+  }
+});
+
+test('persistent ticket failures and non-retryable stapler errors preserve the previous DMG', async t => {
+  for (const extension of ['.app', '.dmg']) {
+    for (const action of ['staple', 'validate']) {
+      for (const status of [68, 65, 66, 77]) {
+        await t.test(`${extension} ${action} status ${status}`, async t => {
+          const options = { ...await fixture(t), signing };
+          const { calls, run } = commands();
+          const waits = [];
+          t.mock.method(console, 'warn', () => {});
+          const failure = Object.assign(new Error('stapler failed'), { status });
+          let attempts = 0;
+          await assert.rejects(createDmg(options, (command, args) => {
+            const result = run(command, args);
+            if (command === 'xcrun' && args[0] === 'stapler' && args[1] === action && args[2].endsWith(extension)) {
+              attempts++;
+              throw failure;
+            }
+            return result;
+          }, async milliseconds => { waits.push(milliseconds); }), error => error === failure);
+          assert.equal(attempts, status === 68 ? 4 : 1);
+          assert.deepEqual(waits, status === 68 ? [10_000, 20_000, 40_000] : []);
+          assert.equal(await readFile(options.outputPath, 'utf8'), 'previous release');
+          assert.equal(calls.filter(call => call[1] === 'notarytool' && call[2] === 'submit').length, extension === '.app' ? 1 : 2);
+          assert.equal(calls.filter(call => call[0] === 'spctl').length, extension === '.app' ? 0 : 1);
+        });
+      }
+    }
+  }
+});
+
 test('a notarization timeout preserves the prior DMG and leaves the submission ID visible without resubmitting', async t => {
   const options = { ...await fixture(t), signing };
   const messages = [];
