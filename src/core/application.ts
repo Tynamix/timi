@@ -129,6 +129,9 @@ export class TrackingApplication {
         case 'correct':
           this.correct(draft, command.removeIds, command.records, now);
           return;
+        case 'adjustStart':
+          this.adjustStart(draft, command, now);
+          return;
         default:
           throw new AppFailure('INVALID_COMMAND');
       }
@@ -400,6 +403,32 @@ export class TrackingApplication {
     }
     // A backward wall clock must not let a current interval disappear from overlap checks.
     if (draft.runtime.active && now < draft.runtime.active.start) throw new AppFailure('CLOCK_INVALID');
+  }
+
+  private adjustStart(draft: State, command: Extract<Command, { type: 'adjustStart' }>, now: number): void {
+    this.requireResolved(draft);
+    const active = draft.runtime.active;
+    if (!active || active.kind !== 'work' || active.start !== command.expectedStart || active.projectId !== command.projectId) throw new AppFailure('ACTIVE_CHANGED');
+    if (now < active.start) throw new AppFailure('CLOCK_INVALID');
+    if (!validTimestamp(command.start) || command.start > now) throw new AppFailure('INVALID_RANGE');
+    if (!Array.isArray(command.overwriteIds) || command.overwriteIds.some(id => typeof id !== 'string')
+      || new Set(command.overwriteIds).size !== command.overwriteIds.length) throw new AppFailure('INVALID_COMMAND');
+    const affected = draft.records.filter(record => record.end > record.start && record.end > command.start && record.start < active.start);
+    const otherWork = affected.filter(record => record.kind === 'work' && record.projectId !== active.projectId);
+    // Approval names the exact immutable record versions shown by the editor, never a blanket overwrite.
+    if (otherWork.some(record => !command.overwriteIds.includes(record.id))) throw new AppFailure('OVERWRITE_REQUIRED');
+    if (command.overwriteIds.some(id => !otherWork.some(record => record.id === id))) throw new AppFailure('ACTIVE_CHANGED');
+    if (command.start === active.start) return;
+    const affectedIds = new Set(affected.map(record => record.id));
+    draft.records = draft.records.filter(record => !affectedIds.has(record.id));
+    for (const record of affected) {
+      // Preserve the untouched prefix exactly, including source and sub-minute precision.
+      if (record.start < command.start) draft.records.push({ ...record, id: randomUUID(), end: command.start });
+    }
+    draft.runtime.active = null;
+    this.assertNoConflict(draft, { start: command.start, end: Infinity, kind: 'work', projectId: active.projectId });
+    draft.runtime.active = { ...active, start: command.start };
+    // A correction is not evidence of new input: retain the native idle/activity anchors.
   }
 
   private assertNoConflict(draft: State, input: RecordInput): void {

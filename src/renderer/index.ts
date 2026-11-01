@@ -5,6 +5,7 @@ import { dailyTargetMs, hoursMs, weeklyTargetMs } from '../core/work-goals';
 import type { AppError, Command, Environment, Locale, Project, RecordInput, Result, Snapshot, TimeRecord, UpdateStatus, WindowKind, WorkspaceView } from '../shared';
 
 const en = {
+  editStart: 'Edit start time', editStartHelp: 'Breaks and untracked time are added to this project when moving the start earlier. Moving it later leaves the removed time untracked.', runningSince: 'Started {date}', invalidStart: 'Enter a valid start time that is not in the future.', overwriteTitle: 'Overwrite time from another project?', overwriteHelp: 'Only the following overlapping time will be assigned to {project}. The rest of each record is kept.', confirmOverwrite: 'Overwrite and save', errorActiveChanged: 'Tracking or the affected records have changed. Close this editor and try again.', errorOverwriteRequired: 'Another project overlaps this time. Save again to review and confirm the affected time.',
   updates: 'App updates', updateHelp: 'Checks GitHub at startup and every six hours. Your time records stay on this Mac. Installation restarts timi with tracking stopped.', updateCheck: 'Check for updates', updateInstall: 'Update and restart', updateRestart: 'Retry restart', updateAvailable: 'Version {version} is available', updateIdle: 'No update check yet.', updateCurrent: 'You are up to date.', updateChecking: 'Checking for updates…', updateDownloading: 'Downloading and verifying update…', updateInstalling: 'Saving time records and installing…', updateDisabled: 'Updates are available in release builds.', updateError: 'The update could not be completed. Check your internet connection and that timi is installed in Applications, then retry. Tracking remains available.', updateRestartError: 'The update is installed. timi stays open until your time records can be saved. Retry the restart.',
   menuBarDisplay: 'Menu bar', showRemaining: 'Show remaining working time', showRemainingHelp: 'Off: worked time. On: time left until your daily target.', showRemainingFallback: 'Without a daily target, worked time is shown. Overtime appears with a minus sign.',
   workGoals: 'Working time targets', workGoalsIntro: 'Your regular hours, day by day.', workGoalsHelp: '0 = day off · Decimal hours: 7.6 h = 7 h 36 min', hours: 'hours', weeklyTarget: 'Weekly target', goalDays: '{days} working days · Mon–Sun', dayOff: 'Day off', goalReminders: 'Notifications', dailyGoalToggle: 'Daily target reached', weeklyGoalToggle: 'Weekly target reached', dailyGoalHelp: 'One notification per day', weeklyGoalHelp: 'One notification per week', goalNotificationSummary: 'About notifications', goalNotificationHelp: 'Breaks and unresolved time are excluded. Notifications do not repeat after restarting timi. Allow notifications for timi in System Settings → Notifications.', invalidWorkHours: 'Enter 0 to 24 hours for each weekday, for example 7.6 or 7,6.', target: 'Target',
@@ -20,6 +21,7 @@ const en = {
   errorStorage: 'timi could not save or read its data. Your previous state has been preserved. Check free disk space and folder access, then try again.', errorStorageVersion: 'This data was created by a newer timi version. It has not been replaced.', errorStorageInvalid: 'The saved data cannot be read safely. It has not been replaced.', errorCommand: 'This action is not valid right now.', errorProjectExists: 'A project with that name already exists. Choose a different name.', errorInvalidProject: 'Enter or select a valid project.', errorProjectMissing: 'That project could not be found. Refresh and try again.', errorPending: 'Resolve the pending time question before starting work or a break.', errorOverlap: 'This period overlaps saved or ongoing work or a break. Adjust its boundaries; no records were changed.', errorRecordMissing: 'That record no longer exists. Close this editor and try again.', errorClock: 'The system clock moved backwards or is invalid. Check the date and time and try again.', errorGeneric: 'The action could not be completed. Please try again.', errorActivity: 'macOS inactivity could not be read. Please try again; timi has kept the previous state.', errorLogin: 'The macOS login setting could not be updated. Check System Settings → General → Login Items.', errorConflictTime: 'Conflicting interval: {start} – {end}.', errorDetailsProject: 'Project: {project}.', dismissError: 'Dismiss message', close: 'Close', refresh: 'Refresh', noProject: 'No project',
 } as const;
 const de: Record<keyof typeof en, string> = {
+  editStart: 'Startzeit ändern', editStartHelp: 'Beim Vorziehen werden Pausen und nicht erfasste Zeit diesem Projekt zugerechnet. Beim Verschieben nach hinten bleibt die entfernte Zeit unerfasst.', runningSince: 'Beginn {date}', invalidStart: 'Gib eine gültige Startzeit ein, die nicht in der Zukunft liegt.', overwriteTitle: 'Zeit eines anderen Projekts überschreiben?', overwriteHelp: 'Nur die folgenden überschneidenden Zeitspannen werden {project} zugeordnet. Der Rest der Einträge bleibt erhalten.', confirmOverwrite: 'Überschreiben und speichern', errorActiveChanged: 'Die Erfassung oder die betroffenen Einträge wurden geändert. Schließe die Bearbeitung und versuche es erneut.', errorOverwriteRequired: 'Ein anderes Projekt überschneidet sich mit dieser Zeit. Speichere erneut, um die betroffenen Zeiten zu prüfen und zu bestätigen.',
   updates: 'App-Updates', updateHelp: 'Prüft GitHub beim Start und alle sechs Stunden. Deine Zeitdaten bleiben auf diesem Mac. Die Installation startet timi mit gestoppter Erfassung neu.', updateCheck: 'Nach Updates suchen', updateInstall: 'Aktualisieren und neu starten', updateRestart: 'Neustart erneut versuchen', updateAvailable: 'Version {version} ist verfügbar', updateIdle: 'Noch nicht nach Updates gesucht.', updateCurrent: 'Du bist auf dem neuesten Stand.', updateChecking: 'Updates werden gesucht…', updateDownloading: 'Update wird geladen und geprüft…', updateInstalling: 'Zeitdaten werden gespeichert, Update wird installiert…', updateDisabled: 'Updates sind in Release-Versionen verfügbar.', updateError: 'Das Update konnte nicht abgeschlossen werden. Prüfe deine Internetverbindung und ob timi unter Programme installiert ist. Versuche es dann erneut. Die Zeiterfassung bleibt verfügbar.', updateRestartError: 'Das Update ist installiert. timi bleibt geöffnet, bis deine Zeitdaten gespeichert werden können. Versuche den Neustart erneut.',
   menuBarDisplay: 'Menüleiste', showRemaining: 'Restarbeitszeit anzeigen', showRemainingHelp: 'Aus: gearbeitete Zeit. Ein: verbleibende Zeit bis zum Tagesziel.', showRemainingFallback: 'Ohne Tagesziel wird die gearbeitete Zeit angezeigt. Überstunden erscheinen mit Minuszeichen.',
   workGoals: 'Arbeitszeitziele', workGoalsIntro: 'Deine reguläre Arbeitszeit pro Tag.', workGoalsHelp: '0 = frei · Dezimalstunden: 7,6 h = 7 Std. 36 Min.', hours: 'Stunden', weeklyTarget: 'Wochenziel', goalDays: '{days} Arbeitstage · Mo–So', dayOff: 'Frei', goalReminders: 'Benachrichtigungen', dailyGoalToggle: 'Tagesziel erreicht', weeklyGoalToggle: 'Wochenziel erreicht', dailyGoalHelp: 'Eine Mitteilung pro Tag', weeklyGoalHelp: 'Eine Mitteilung pro Woche', goalNotificationSummary: 'Hinweise zu Mitteilungen', goalNotificationHelp: 'Pausen und ungeklärte Zeit zählen nicht mit. Mitteilungen wiederholen sich auch nach einem Neustart von timi nicht. Erlaube Mitteilungen für timi unter Systemeinstellungen → Mitteilungen.', invalidWorkHours: 'Gib für jeden Wochentag 0 bis 24 Stunden ein, zum Beispiel 7,6 oder 7.6.', target: 'Ziel',
@@ -115,6 +117,8 @@ function shortDate(ms: number): string { return new Intl.DateTimeFormat(locale, 
 function projectName(id: string | null): string { return state?.projects.find(project => project.id === id)?.name ?? t('noProject'); }
 function brand(): HTMLElement { const node = el('div', 'brand', 'timi'); node.append(el('span', 'brand-dot')); return node; }
 function errorText(error: AppError): string {
+  if (error.code === 'ACTIVE_CHANGED') return t('errorActiveChanged');
+  if (error.code === 'OVERWRITE_REQUIRED') return t('errorOverwriteRequired');
   const map: Record<string, TextKey> = { STORAGE_ERROR: 'errorStorage', STORAGE_VERSION: 'errorStorageVersion', STORAGE_INVALID: 'errorStorageInvalid', INVALID_COMMAND: 'errorCommand', INVALID_SETTINGS: 'invalidSettings', INVALID_PROJECT: 'errorInvalidProject', PROJECT_EXISTS: 'errorProjectExists', PROJECT_NOT_FOUND: 'errorProjectMissing', PENDING_REQUIRED: 'errorPending', INVALID_RANGE: 'invalidDate', OVERLAP: 'errorOverlap', RECORD_NOT_FOUND: 'errorRecordMissing', CLOCK_INVALID: 'errorClock', LOGIN_ERROR: 'errorLogin', ACTIVITY_ERROR: 'errorActivity' };
   let message = t(map[error.code] ?? 'errorGeneric');
   if (error.code === 'OVERLAP' && typeof error.details?.start === 'number' && typeof error.details?.end === 'number') message += ` ${t('errorConflictTime', { start: dateTime(error.details.start), end: dateTime(error.details.end) })}`;
@@ -168,6 +172,7 @@ let entryHint: HTMLElement;
 let todayValue: HTMLElement;
 let statusTitle: HTMLElement;
 let statusDetail: HTMLElement;
+let startTimeButton: HTMLButtonElement;
 let statusMark: HTMLElement;
 let statusPanel: HTMLElement;
 let trackingControls: HTMLElement;
@@ -177,6 +182,7 @@ function buildEntry(): void {
   todayValue = el('div', 'today-value mono'); append(today, todayValue, el('div', 'today-label', t('today'))); append(header, brand(), today);
   statusPanel = el('section', 'status'); statusMark = el('div', 'status-mark'); statusMark.setAttribute('aria-hidden', 'true');
   const statusText = el('div', 'grow'); statusTitle = el('div', 'status-title'); statusDetail = el('div', 'status-detail'); append(statusText, statusTitle, statusDetail);
+  startTimeButton = markAction(button('', openStartEditor, 'quiet start-time-button')); startTimeButton.setAttribute('aria-label', t('editStart')); startTimeButton.title = t('editStart'); statusText.append(startTimeButton);
   trackingControls = el('div', 'tracking-controls'); append(statusPanel, statusMark, statusText, trackingControls);
   reminderPanel = el('section', 'notice reminder'); append(reminderPanel, el('strong', '', t('reminderTitle')), el('p', '', t('reminderText')));
   const reminderButtons = el('div', 'button-row'); append(reminderButtons, markAction(button(t('later'), async () => { if (await send({ type: 'later' })) await nativeAction(window.timi.closeWindow()); })), markAction(button(t('startBreak'), async () => { if (await send({ type: 'pause' })) await nativeAction(window.timi.closeWindow()); }, 'primary'))); reminderPanel.append(reminderButtons);
@@ -216,6 +222,8 @@ function updateEntry(): void {
   else if (state.mode === 'break') { statusTitle.textContent = t('manualBreak'); statusDetail.textContent = `${fmt(state.now - (state.active?.start ?? state.now))} · ${t('break')}`; statusMark.textContent = 'Ⅱ'; }
   else if (state.mode === 'pending') { statusTitle.textContent = t('pending'); statusDetail.textContent = t('pendingDetail'); statusMark.textContent = '?'; }
   else { statusTitle.textContent = t('untracked'); statusDetail.textContent = t('untrackedDetail'); statusMark.textContent = '○'; }
+  startTimeButton.hidden = state.mode !== 'work';
+  if (state.active) startTimeButton.textContent = `${t('runningSince', { date: dateTime(state.active.start) })} ✎`;
   const controlsSignature = `${state.mode}:${state.resumeProjectId}`;
   if (controlsSignature !== entryControlSignature) {
     entryControlSignature = controlsSignature; trackingControls.replaceChildren();
@@ -314,6 +322,7 @@ function renderRecords(records: TimeRecord[], showActive: boolean, showPending: 
   function row(item: Pick<TimeRecord, 'kind' | 'start' | 'projectId'> & { end: number }, subtitle: string, saved?: TimeRecord, pending = false): void {
     const tr = el('tr'); const kindCell = el('td'); kindCell.append(el('span', `kind-badge ${pending ? 'pending' : item.kind}`, t(pending ? 'unresolved' : item.kind))); const projectCell = el('td', 'project-name', item.kind === 'work' || pending ? projectName(item.projectId) : '—'); projectCell.append(el('div', 'record-source', subtitle));
     const startCell = el('td', 'mono', dateTime(item.start)); const endCell = el('td', 'mono', saved || state.pending?.end && pending ? dateTime(item.end) : t('live')); const duration = el('td', 'number', pending ? '—' : fmt(item.end - item.start)); const action = el('td'); if (saved) action.append(button(t('edit'), () => openEditor(saved)));
+    if (!saved && !pending && item.kind === 'work') action.append(markAction(button(t('editStart'), openStartEditor)));
     append(tr, kindCell, projectCell, startCell, endCell, duration, action); body.append(tr);
   }
   if (showPending && state.pending) { const pending = state.pending; row({ kind: 'work', start: pending.start, end: pending.end ?? state.now, projectId: pending.projectId }, t('unresolved'), undefined, true); }
@@ -485,6 +494,69 @@ function parseLocalInput(value: string, original: number, occurrence?: HTMLSelec
   return possible.includes(original) ? original : possible[0] ?? NaN;
 }
 function utcOffset(ms: number): string { const minutes = -new Date(ms).getTimezoneOffset(); return `UTC${minutes >= 0 ? '+' : '−'}${String(Math.floor(Math.abs(minutes) / 60)).padStart(2, '0')}:${String(Math.abs(minutes) % 60).padStart(2, '0')}`; }
+function openStartEditor(): void {
+  const active = state.active;
+  if (state.mode !== 'work' || !active || !active.projectId) return;
+  editorDialog?.close(); editorDialog?.remove();
+  const dialog = el('dialog', 'start-editor-dialog'); editorDialog = dialog; dialog.setAttribute('aria-labelledby', 'start-editor-title');
+  const form = el('form', 'editor'); form.noValidate = true;
+  const header = el('div', 'editor-header'); const title = el('h2', '', t('editStart')); title.id = 'start-editor-title';
+  const close = button('×', closeEditor, 'quiet icon'); close.setAttribute('aria-label', t('close')); append(header, title, close);
+  const input = el('input'); input.type = 'datetime-local'; input.step = '60'; input.required = true; input.value = localMinuteInput(active.start);
+  const field = labelField(t('start'), input); const occurrence = el('select'); occurrence.setAttribute('aria-label', t('ambiguousTime'));
+  const ambiguity = el('div', 'ambiguity'); append(ambiguity, el('p', 'field-help', t('ambiguousTime')), occurrence); field.append(ambiguity);
+  const preview = el('p', 'field-help'); const error = el('p', 'editor-error'); error.setAttribute('role', 'alert'); editorAlert = error;
+  const confirmation = el('section', 'delete-confirm'); confirmation.hidden = true; confirmation.setAttribute('aria-label', t('overwriteTitle'));
+  const save = button(t('saveChanges'), () => undefined, 'primary'); save.type = 'submit';
+  const actions = el('div', 'button-row start-editor-actions'); append(actions, button(t('cancel'), closeEditor), save);
+  function closeEditor(): void { dialog.close(); dialog.remove(); if (editorDialog === dialog) { editorDialog = null; editorAlert = null; } }
+  dialog.addEventListener('cancel', event => { event.preventDefault(); closeEditor(); });
+  function updatePreview(): void {
+    confirmation.hidden = true; save.hidden = false; error.textContent = '';
+    const start = parseLocalInput(input.value, active!.start, occurrence);
+    preview.textContent = Number.isFinite(start) && start <= state.now ? `${projectName(active!.projectId)} · ${t('duration')}: ${fmt(state.now - start)} · ${utcOffset(start)}` : t('invalidStart');
+  }
+  function updateOccurrence(): void {
+    const candidates = correctionLocalTimes(input.value, active!.start), prior = occurrence.value ? Number(occurrence.value) : active!.start;
+    const selected = candidates.includes(prior) ? prior : candidates.includes(active!.start) ? active!.start : candidates[0];
+    occurrence.replaceChildren(...candidates.map((candidate, index) => { const option = el('option', '', t(index === 0 ? 'firstOccurrence' : 'secondOccurrence', { offset: utcOffset(candidate) })); option.value = String(candidate); return option; }));
+    if (selected !== undefined) occurrence.value = String(selected); ambiguity.hidden = candidates.length < 2; updatePreview();
+  }
+  input.addEventListener('input', updateOccurrence); occurrence.addEventListener('change', updatePreview);
+  async function persist(command: Extract<Command, { type: 'adjustStart' }>): Promise<void> {
+    if (busy) return;
+    save.disabled = true; input.disabled = true; occurrence.disabled = true;
+    for (const control of confirmation.querySelectorAll('button')) control.disabled = true;
+    if (await send(command)) closeEditor();
+    else { confirmation.hidden = true; save.hidden = false; save.disabled = false; input.disabled = false; occurrence.disabled = false; }
+  }
+  form.addEventListener('submit', async event => {
+    event.preventDefault(); if (busy) return;
+    const start = parseLocalInput(input.value, active.start, occurrence);
+    if (!Number.isFinite(start)) { error.textContent = t('invalidStart'); return; }
+    // Refresh the review from the source of truth; the command checks it again inside the transaction.
+    busy = true; save.disabled = true; input.disabled = true; occurrence.disabled = true; updateBusy();
+    const result = await safe(window.timi.snapshot());
+    busy = false; save.disabled = false; input.disabled = false; occurrence.disabled = false; updateBusy();
+    if (!dialog.open) return;
+    if (!result.ok) { showError(result.error); return; }
+    const latest = result.value;
+    if (latest.mode !== 'work' || latest.active?.start !== active.start || latest.active.projectId !== active.projectId) { error.textContent = t('errorActiveChanged'); return; }
+    if (start > latest.now) { error.textContent = t('invalidStart'); return; }
+    error.textContent = '';
+    const conflicts = latest.records.filter(record => record.end > record.start && record.start < active.start && record.end > start && record.kind === 'work' && record.projectId !== active.projectId);
+    const command: Extract<Command, { type: 'adjustStart' }> = { type: 'adjustStart', start, expectedStart: active.start, projectId: active.projectId!, overwriteIds: conflicts.map(record => record.id) };
+    if (!conflicts.length) { await persist(command); return; }
+    const list = el('ul', 'overwrite-records');
+    for (const record of conflicts) list.append(el('li', '', `${projectName(record.projectId)} · ${dateTime(Math.max(start, record.start))} – ${dateTime(Math.min(active.start, record.end))}`));
+    confirmation.replaceChildren(el('strong', '', t('overwriteTitle')), el('p', '', t('overwriteHelp', { project: projectName(active.projectId) })), list, button(t('confirmOverwrite'), () => persist(command), 'danger'));
+    confirmation.hidden = false;
+    save.hidden = true;
+    confirmation.querySelector('button')?.focus();
+  });
+  append(form, header, el('p', 'editor-intro', t('editStartHelp')), field, preview, error, confirmation, actions);
+  dialog.append(form); content.append(dialog); updateOccurrence(); dialog.showModal(); input.focus();
+}
 function openEditor(record?: TimeRecord): void {
   editorDialog?.close(); editorDialog?.remove();
   const now = Math.floor(state.now / 60_000) * 60_000;
