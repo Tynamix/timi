@@ -1,11 +1,13 @@
 import { desktopReady } from '../desktop';
 import { correctionLocalTimes, localMinuteInput } from './time-input';
 import { parseWorkHours } from './work-hours';
+import { matchesRecordFilters, type RecordFilters } from './record-filters';
 import { dailyTargetMs, hoursMs, weeklyTargetMs } from '../core/work-goals';
 import { needsOverwrite, overlapRange } from '../core/corrections';
 import type { AppError, Command, Environment, Locale, Project, RecordInput, Result, Snapshot, TimeRecord, UpdateStatus, WindowKind, WorkspaceView } from '../shared';
 
 const en = {
+  filterColumn: 'Filter by {column}', allProjects: 'All projects', allTypes: 'All types', allDays: 'All days', day: 'Day', resetFilters: 'Reset filters', recordMatches: '{shown} of {total} records', noMatchingRecords: 'No time records match these filters.',
   overwriteCorrectionHelp: 'Only the listed overlapping time will be replaced by your changes. All other parts are kept. Ongoing tracking continues after the replaced interval.',
   editStart: 'Edit start time', editStartHelp: 'Breaks and untracked time are added to this project when moving the start earlier. Moving it later leaves the removed time untracked.', runningSince: 'Started {date}', invalidStart: 'Enter a valid start time that is not in the future.', overwriteTitle: 'Overwrite time from another project?', overwriteHelp: 'Only the following overlapping time will be assigned to {project}. The rest of each record is kept.', confirmOverwrite: 'Overwrite and save', errorActiveChanged: 'Tracking or the affected records have changed. Close this editor and try again.', errorOverwriteRequired: 'Another project overlaps this time. Save again to review and confirm the affected time.',
   updates: 'App updates', updateHelp: 'Checks GitHub at startup and every six hours. Your time records stay on this Mac. Installation restarts timi with tracking stopped.', updateCheck: 'Check for updates', updateInstall: 'Update and restart', updateRestart: 'Retry restart', updateAvailable: 'Version {version} is available', updateIdle: 'No update check yet.', updateCurrent: 'You are up to date.', updateChecking: 'Checking for updates…', updateDownloading: 'Downloading and verifying update…', updateInstalling: 'Saving time records and installing…', updateDisabled: 'Updates are available in release builds.', updateError: 'The update could not be completed. Check your internet connection and that timi is installed in Applications, then retry. Tracking remains available.', updateRestartError: 'The update is installed. timi stays open until your time records can be saved. Retry the restart.',
@@ -23,6 +25,7 @@ const en = {
   errorStorage: 'timi could not save or read its data. Your previous state has been preserved. Check free disk space and folder access, then try again.', errorStorageVersion: 'This data was created by a newer timi version. It has not been replaced.', errorStorageInvalid: 'The saved data cannot be read safely. It has not been replaced.', errorCommand: 'This action is not valid right now.', errorProjectExists: 'A project with that name already exists. Choose a different name.', errorInvalidProject: 'Enter or select a valid project.', errorProjectMissing: 'That project could not be found. Refresh and try again.', errorPending: 'Resolve the pending time question before starting work or a break.', errorOverlap: 'This period overlaps saved or ongoing work or a break. Adjust its boundaries; no records were changed.', errorRecordMissing: 'That record no longer exists. Close this editor and try again.', errorClock: 'The system clock moved backwards or is invalid. Check the date and time and try again.', errorGeneric: 'The action could not be completed. Please try again.', errorActivity: 'macOS inactivity could not be read. Please try again; timi has kept the previous state.', errorLogin: 'The macOS login setting could not be updated. Check System Settings → General → Login Items.', errorConflictTime: 'Conflicting interval: {start} – {end}.', errorDetailsProject: 'Project: {project}.', dismissError: 'Dismiss message', close: 'Close', refresh: 'Refresh', noProject: 'No project',
 } as const;
 const de: Record<keyof typeof en, string> = {
+  filterColumn: 'Nach {column} filtern', allProjects: 'Alle Projekte', allTypes: 'Alle Arten', allDays: 'Alle Tage', day: 'Tag', resetFilters: 'Zurücksetzen', recordMatches: '{shown} von {total} Einträgen', noMatchingRecords: 'Keine Zeiteinträge passen zu diesen Filtern.',
   overwriteCorrectionHelp: 'Nur die aufgeführten überschneidenden Zeiten werden durch deine Änderungen ersetzt. Alle anderen Abschnitte bleiben erhalten. Eine laufende Erfassung läuft nach dem ersetzten Zeitraum weiter.',
   editStart: 'Startzeit ändern', editStartHelp: 'Beim Vorziehen werden Pausen und nicht erfasste Zeit diesem Projekt zugerechnet. Beim Verschieben nach hinten bleibt die entfernte Zeit unerfasst.', runningSince: 'Beginn {date}', invalidStart: 'Gib eine gültige Startzeit ein, die nicht in der Zukunft liegt.', overwriteTitle: 'Zeit eines anderen Projekts überschreiben?', overwriteHelp: 'Nur die folgenden überschneidenden Zeitspannen werden {project} zugeordnet. Der Rest der Einträge bleibt erhalten.', confirmOverwrite: 'Überschreiben und speichern', errorActiveChanged: 'Die Erfassung oder die betroffenen Einträge wurden geändert. Schließe die Bearbeitung und versuche es erneut.', errorOverwriteRequired: 'Ein anderes Projekt überschneidet sich mit dieser Zeit. Speichere erneut, um die betroffenen Zeiten zu prüfen und zu bestätigen.',
   updates: 'App-Updates', updateHelp: 'Prüft GitHub beim Start und alle sechs Stunden. Deine Zeitdaten bleiben auf diesem Mac. Die Installation startet timi mit gestoppter Erfassung neu.', updateCheck: 'Nach Updates suchen', updateInstall: 'Aktualisieren und neu starten', updateRestart: 'Neustart erneut versuchen', updateAvailable: 'Version {version} ist verfügbar', updateIdle: 'Noch nicht nach Updates gesucht.', updateCurrent: 'Du bist auf dem neuesten Stand.', updateChecking: 'Updates werden gesucht…', updateDownloading: 'Update wird geladen und geprüft…', updateInstalling: 'Zeitdaten werden gespeichert, Update wird installiert…', updateDisabled: 'Updates sind in Release-Versionen verfügbar.', updateError: 'Das Update konnte nicht abgeschlossen werden. Prüfe deine Internetverbindung und ob timi unter Programme installiert ist. Versuche es dann erneut. Die Zeiterfassung bleibt verfügbar.', updateRestartError: 'Das Update ist installiert. timi bleibt geöffnet, bis deine Zeitdaten gespeichert werden können. Versuche den Neustart erneut.',
@@ -250,6 +253,67 @@ let nextWeekButton: HTMLButtonElement;
 let currentWeekButton: HTMLButtonElement;
 let tableSignature = '';
 let recordsSignature = '';
+let recordProjectFilter: HTMLSelectElement;
+let recordKindFilter: HTMLSelectElement;
+let recordDayFilter: HTMLSelectElement;
+let resetRecordFilters: HTMLButtonElement;
+let recordMatches: HTMLElement;
+let recordBody: HTMLTableSectionElement;
+let filterOptionsSignature = '';
+function currentRecordFilters(): RecordFilters {
+  return { project: recordProjectFilter.value, kind: recordKindFilter.value as RecordFilters['kind'], day: recordDayFilter.value };
+}
+function buildRecordTable(): HTMLElement {
+  recordProjectFilter = el('select'); recordProjectFilter.id = 'record-project-filter';
+  recordKindFilter = el('select'); recordKindFilter.id = 'record-kind-filter';
+  recordDayFilter = el('select'); recordDayFilter.id = 'record-day-filter';
+  for (const [value, label] of [['', t('allTypes')], ['work', t('work')], ['break', t('break')], ['pending', t('unresolved')]]) recordKindFilter.append(new Option(label, value));
+  for (const select of [recordProjectFilter, recordKindFilter, recordDayFilter]) select.addEventListener('change', updateOverview);
+  resetRecordFilters = button(t('resetFilters'), () => {
+    for (const select of [recordProjectFilter, recordKindFilter, recordDayFilter]) select.value = '';
+    updateOverview();
+  }, 'quiet');
+  recordMatches = el('p', 'record-matches'); recordMatches.setAttribute('role', 'status');
+  const table = el('table', 'records-table'); table.setAttribute('aria-label', t('records'));
+  const columns = el('colgroup');
+  for (const name of ['kind', 'project', 'start', 'end', 'duration', 'action']) columns.append(el('col', `record-column-${name}`));
+  const head = el('thead'); const row = el('tr');
+  for (const [key, select, label] of [
+    ['type', recordKindFilter, 'type'], ['project', recordProjectFilter, 'project'], ['start', recordDayFilter, 'day'], ['end', null, 'end'], ['duration', null, 'duration'],
+  ] as const) {
+    const cell = el('th', key === 'duration' ? 'number' : ''); cell.scope = 'col';
+    if (select) {
+      select.setAttribute('aria-label', t('filterColumn', { column: t(label) }));
+      const heading = el('div', 'record-column-heading');
+      const control = el('span', 'record-filter-control');
+      const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      icon.setAttribute('viewBox', '0 0 24 24'); icon.setAttribute('aria-hidden', 'true');
+      icon.setAttribute('fill', 'none'); icon.setAttribute('stroke', 'currentColor'); icon.setAttribute('stroke-width', '1.7'); icon.setAttribute('stroke-linejoin', 'round');
+      const path = document.createElementNS(icon.namespaceURI, 'path'); path.setAttribute('d', 'M3 4h18l-7 8v6l-4 2v-8z'); icon.append(path);
+      // Keep the native menu and keyboard interaction; only its icon is custom.
+      append(control, icon, select); append(heading, el('span', '', t(key)), control); cell.append(heading);
+    } else cell.textContent = t(key);
+    row.append(cell);
+  }
+  row.append(el('th')); head.append(row); recordBody = el('tbody');
+  append(table, columns, head, recordBody);
+  return table;
+}
+function updateRecordFilterOptions(): void {
+  const signature = JSON.stringify([state.projects, state.week.days]);
+  if (signature === filterOptionsSignature) return;
+  filterOptionsSignature = signature;
+  const selected = currentRecordFilters();
+  recordProjectFilter.replaceChildren(new Option(t('allProjects'), ''), new Option(t('noProject'), 'none'));
+  for (const project of [...state.projects].sort((a, b) => a.name.localeCompare(b.name, locale))) {
+    recordProjectFilter.append(new Option(`${project.name}${project.archived ? ` (${t('archived')})` : ''}`, project.id));
+  }
+  recordProjectFilter.value = selected.project;
+  if (recordProjectFilter.selectedIndex < 0) recordProjectFilter.value = '';
+  recordDayFilter.replaceChildren(new Option(t('allDays'), ''));
+  state.week.days.forEach((day, index) => recordDayFilter.append(new Option(new Intl.DateTimeFormat(locale, { weekday: 'short', day: '2-digit', month: '2-digit' }).format(day), String(index))));
+  recordDayFilter.value = selected.day;
+}
 function buildOverview(): void {
   const page = el('div', 'page overview-page'); const header = el('header', 'page-header row between'); const title = el('div'); append(title, el('h1', '', t('weekTitle')), el('p', 'muted tiny', t('weekSubtitle')));
   const navigation = el('nav', 'week-navigation'); const previous = button('‹', async () => { weekOffset--; await refresh(); }, 'icon'); previous.setAttribute('aria-label', t('previousWeek'));
@@ -270,7 +334,10 @@ function buildOverview(): void {
   function summary(title: string, caption: string): HTMLElement { const card = el('div', 'card summary-card'); const value = el('div', 'summary-number mono'); append(card, el('div', 'eyebrow', title), value, el('p', 'muted summary-caption', caption)); summaries.append(card); return value; }
   workSummary = summary(t('workTotal'), t('actualTime')); breakSummary = summary(t('breaks'), t('breaksSeparate')); projectSummary = summary(t('trackedProjects'), t('projectsThisWeek'));
   weekTable = el('div', 'table-wrap'); const note = el('p', 'overview-note', t('dayNote'));
-  const recordsHeader = el('div', 'section-header row between'); append(recordsHeader, el('h2', '', t('records')), button(t('addRecord'), () => openEditor(), 'primary')); recordTable = el('div', 'table-wrap');
+  recordTable = el('div', 'table-wrap'); recordTable.append(buildRecordTable());
+  const recordsHeader = el('div', 'section-header row between');
+  const recordActions = el('div', 'button-row record-list-actions'); append(recordActions, recordMatches, resetRecordFilters, button(t('addRecord'), () => openEditor(), 'primary'));
+  append(recordsHeader, el('h2', '', t('records')), recordActions);
   const manager = el('details', 'card projects-panel'); append(manager, el('summary', '', t('manageProjects')), el('p', 'field-help', t('manageHelp'))); managerList = el('div', 'project-manager-list'); manager.append(managerList);
   const createRow = el('form', 'project-create-row'); const name = el('input'); name.placeholder = t('newProjectName'); name.setAttribute('aria-label', t('newProjectName')); name.autocomplete = 'off'; const create = markAction(button(t('createProject'), () => undefined)); create.type = 'submit'; append(createRow, name, create);
   createRow.addEventListener('submit', event => { event.preventDefault(); if (!name.value.trim()) { showError(t('projectNameRequired')); name.focus(); return; } void send({ type: 'createProject', name: name.value }).then(success => { if (success) name.value = ''; }); }); manager.append(createRow);
@@ -302,11 +369,25 @@ function updateOverview(): void {
   workSummary.textContent = `${fmt(week.workTotal)}${target > 0 && weekOffset === 0 ? ` / ${fmt(target)}` : ''}`; breakSummary.textContent = fmt(week.breakTotal); projectSummary.textContent = String(week.rows.filter(row => row.total > 0).length);
   const signature = JSON.stringify({ start: week.start, rows: week.rows.map(row => ({ ...row, days: row.days.map(fmt), total: fmt(row.total) })), work: week.workDays.map(fmt), breaks: week.breakDays.map(fmt), totals: [fmt(week.workTotal), fmt(week.breakTotal)] });
   if (signature !== tableSignature) { tableSignature = signature; renderWeekTable(); }
+  updateRecordFilterOptions();
+  const filters = currentRecordFilters();
+  const filtered = !!(filters.project || filters.kind || filters.day);
+  resetRecordFilters.disabled = !filtered;
+  for (const [select, title] of [[recordProjectFilter, 'allProjects'], [recordKindFilter, 'allTypes'], [recordDayFilter, 'allDays']] as const) {
+    select.parentElement!.classList.toggle('filtered', select.value !== '');
+    select.title = `${select.getAttribute('aria-label')}: ${select.value ? select.selectedOptions[0].text : t(title)}`;
+  }
   const records = state.records.filter(record => record.start < week.end && record.end > week.start).sort((a, b) => b.start - a.start);
   const active = state.active && state.active.start < week.end && state.now > week.start ? state.active : null;
   const pending = state.pending && state.pending.start < week.end && (state.pending.end ?? state.now) > week.start ? state.pending : null;
-  const logSignature = JSON.stringify([records, state.projects, active, pending, active || pending ? fmt(state.now) : '']);
-  if (logSignature !== recordsSignature) { recordsSignature = logSignature; renderRecords(records, !!active, !!pending); }
+  const matches = (record: Parameters<typeof matchesRecordFilters>[0], unresolved = false) => matchesRecordFilters(record, unresolved, filters, week.days, week.end);
+  const visibleRecords = records.filter(record => matches(record));
+  const showActive = !!active && matches({ ...active, end: state.now });
+  const showPending = !!pending && matches({ ...pending, kind: 'work', end: pending.end ?? state.now }, true);
+  const count = t('recordMatches', { shown: visibleRecords.length + Number(showActive) + Number(showPending), total: records.length + Number(!!active) + Number(!!pending) });
+  if (recordMatches.textContent !== count) recordMatches.textContent = count;
+  const logSignature = JSON.stringify([visibleRecords, state.projects, showActive ? active : null, showPending ? pending : null, showActive || showPending ? fmt(state.now) : '', filtered]);
+  if (logSignature !== recordsSignature) { recordsSignature = logSignature; renderRecords(visibleRecords, showActive, showPending, filtered); }
   const projects = JSON.stringify(state.projects);
   if (projects !== projectSignature) { projectSignature = projects; renderProjectManager(); }
 }
@@ -319,9 +400,11 @@ function renderWeekTable(): void {
   const foot = el('tfoot'); const total = el('tr'); total.append(el('td', '', t('dailyTotal'))); for (const ms of week.workDays) total.append(el('td', 'number', fmt(ms))); total.append(el('td', 'number', fmt(week.workTotal)));
   const breaks = el('tr', 'break-total-row'); breaks.append(el('td', '', t('breaks'))); for (const ms of week.breakDays) breaks.append(el('td', 'number', fmt(ms))); breaks.append(el('td', 'number', fmt(week.breakTotal))); append(foot, total, breaks); append(table, head, body, foot); weekTable.replaceChildren(table);
 }
-function renderRecords(records: TimeRecord[], showActive: boolean, showPending: boolean): void {
-  if (!records.length && !showActive && !showPending) { recordTable.replaceChildren(el('div', 'empty-state', t('emptyRecords'))); return; }
-  const table = el('table', 'records-table'); const head = el('thead'); const tr = el('tr'); for (const key of ['type', 'project', 'start', 'end', 'duration'] as TextKey[]) tr.append(el('th', key === 'duration' ? 'number' : '', t(key))); tr.append(el('th')); head.append(tr); const body = el('tbody');
+function renderRecords(records: TimeRecord[], showActive: boolean, showPending: boolean, filtered: boolean): void {
+  const body = document.createDocumentFragment();
+  if (!records.length && !showActive && !showPending) {
+    const row = el('tr'); const cell = el('td', 'empty-state', t(filtered ? 'noMatchingRecords' : 'emptyRecords')); cell.colSpan = 6; row.append(cell); recordBody.replaceChildren(row); return;
+  }
   function row(item: Pick<TimeRecord, 'kind' | 'start' | 'projectId'> & { end: number }, subtitle: string, saved?: TimeRecord, pending = false): void {
     const tr = el('tr'); const kindCell = el('td'); kindCell.append(el('span', `kind-badge ${pending ? 'pending' : item.kind}`, t(pending ? 'unresolved' : item.kind))); const projectCell = el('td', 'project-name', item.kind === 'work' || pending ? projectName(item.projectId) : '—'); projectCell.append(el('div', 'record-source', subtitle));
     const startCell = el('td', 'mono', dateTime(item.start)); const endCell = el('td', 'mono', saved || state.pending?.end && pending ? dateTime(item.end) : t('live')); const duration = el('td', 'number', pending ? '—' : fmt(item.end - item.start)); const action = el('td'); if (saved) action.append(button(t('edit'), () => openEditor(saved)));
@@ -332,7 +415,7 @@ function renderRecords(records: TimeRecord[], showActive: boolean, showPending: 
   if (showActive && state.active) row({ ...state.active, end: state.now }, t('live'));
   const sources: Record<TimeRecord['source'], TextKey> = { manual: 'manualSource', tracked: 'trackedSource', idle: 'idleSource', recovery: 'recoverySource' };
   for (const record of records) row(record, t(sources[record.source]), record);
-  append(table, head, body); recordTable.replaceChildren(table);
+  recordBody.replaceChildren(body);
 }
 function renderProjectManager(): void {
   managerList.replaceChildren(); if (!state.projects.length) { managerList.append(el('p', 'field-help', t('noManagedProjects'))); return; }
