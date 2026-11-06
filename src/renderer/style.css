@@ -54,4 +54,16 @@ body:has(.entry-page) #app{min-height:100vh;display:flex;flex-direction:column}b
 .start-editor-dialog .editor{padding:18px}.start-editor-dialog .editor-header{margin-bottom:12px}.start-editor-dialog .editor-header h2{font-size:16px}
 .start-editor-dialog .field{margin-bottom:10px}.start-editor-dialog .delete-confirm p{margin-top:7px}
 .start-editor-actions{justify-content:flex-end;margin-top:16px}.overwrite-records{padding-left:18px;line-height:1.6;font-size:11px}
+.records-table{table-layout:fixed;min-width:900px}
+.record-column-kind{width:10%}.record-column-project{width:19%}.record-column-start,.record-column-end{width:21%}.record-column-duration{width:9%}.record-column-action{width:20%}
+.records-table td{overflow:hidden;text-overflow:ellipsis}
+.record-column-heading{display:flex;align-items:center;gap:7px}
+.record-filter-control{position:relative;display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;flex:none;border-radius:5px;color:var(--subtle)}
+.record-filter-control svg{width:14px;height:14px;pointer-events:none}
+.record-filter-control select{position:absolute;inset:0;width:100%;height:100%;padding:0;opacity:0;cursor:pointer}
+.record-filter-control:hover,.record-filter-control.filtered{background:var(--accent-soft);color:var(--accent)}
+.record-filter-control:focus-within{outline:3px solid #8abda7;outline-offset:2px}
+.record-list-actions{justify-content:flex-end}
+.record-list-actions .quiet{font-size:11px;padding:7px 9px}
+.record-matches{color:var(--subtle);font-size:11px;font-variant-numeric:tabular-nums}
 fieldset.editor-segments{border:0;margin:0;min-width:0}
