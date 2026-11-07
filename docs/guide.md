@@ -99,6 +99,8 @@ Base64 is not encryption. Never commit certificates containing private keys or p
 
 Each Apple submission can wait up to 60 minutes; the release-job limit is 150 minutes. Phase messages, submission IDs and native progress appear in the job log. Apple may continue processing after a timeout; query the existing submission before retrying. A later acceptance does not automatically finish an aborted release or cover a differently rebuilt app.
 
+DMG creation retries `Resource busy` failures up to three times, waiting 10, 20 and 40 seconds and removing any partial staging image before the next attempt. Ticket-service errors (stapler exit 68) use the same retry schedule for stapling and validation, including the extracted updater app. These retries repeat only the affected command, without rebuilding or resubmitting to Apple. Other errors and exhausted retries abort the release; signature, notarization and Gatekeeper checks remain required.
+
 Local signed builds require `APPLE_TEAM_ID`, `MACOS_SIGNING_KEYCHAIN`, and a `timi-notarization` profile stored in that keychain with `xcrun notarytool store-credentials`. Use its interactive password prompt. `node scripts/signing-check.mjs` checks signing without uploading an app; `npm run package:universal -- --signed` builds the trusted DMG.
 
 ### In-app updates
