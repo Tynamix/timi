@@ -57,6 +57,35 @@ async function runStapler(action, target, run, wait) {
   }
 }
 
+export async function verifyPackagedApp(appPath, run = command, wait = delay) {
+  run('codesign', ['--verify', '--deep', '--strict', appPath]);
+  await runStapler('validate', appPath, run, wait);
+  run('spctl', ['--assess', '--type', 'execute', '--verbose=2', appPath]);
+}
+
+async function createDiskImage(contents, image, run, wait) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      // Capture the diagnostic to distinguish a busy resource from permanent errors.
+      // Keep stdout streaming and use a stable locale for hdiutil's error message.
+      run('hdiutil', ['create', '-volname', 'timi', '-srcfolder', contents, '-fs', 'HFS+', '-format', 'UDZO', image], {
+        encoding: 'utf8', stdio: ['ignore', 'inherit', 'pipe'], env: { ...process.env, LC_ALL: 'C' },
+      });
+      return;
+    } catch (error) {
+      const diagnostic = error.stderr?.toString() ?? '';
+      if (diagnostic) process.stderr.write(diagnostic);
+      if (error.status !== 1 || !/^hdiutil: create failed - Resource busy\s*$/m.test(diagnostic) || attempt >= 4) throw error;
+      const milliseconds = 10_000 * 2 ** (attempt - 1);
+      console.warn(`[package] hdiutil create returned Resource busy; retry ${attempt}/3 in ${milliseconds / 1000}s...`);
+      await wait(milliseconds);
+      // A failed create may leave a partial image. Only remove this attempt's
+      // staging file; the previous release stays untouched until verification.
+      await rm(image, { force: true });
+    }
+  }
+}
+
 async function notarize(archive, target, signing, run, wait) {
   const credentials = ['--keychain-profile', 'timi-notarization', '--keychain', signing.keychain];
   console.log(`[notarization] Uploading ${basename(archive)} to Apple...`);
@@ -106,7 +135,7 @@ export async function createDmg({ appPath, outputPath, staging, signing }, run =
   run('ditto', [appPath, join(contents, 'timi.app')]);
   await symlink('/Applications', join(contents, 'Applications'));
   const image = join(staging, basename(outputPath));
-  run('hdiutil', ['create', '-volname', 'timi', '-srcfolder', contents, '-fs', 'HFS+', '-format', 'UDZO', image]);
+  await createDiskImage(contents, image, run, wait);
   run('hdiutil', ['verify', image]);
   if (signing) {
     console.log('[package] Signing the DMG with Developer ID...');

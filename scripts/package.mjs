@@ -2,7 +2,7 @@ import { cp, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { resolve, join } from 'node:path';
 import { parseArgs } from 'node:util';
-import { createDmg, signingOptions } from './distribution.mjs';
+import { createDmg, signingOptions, verifyPackagedApp } from './distribution.mjs';
 import { rustEnvironment } from './rust-environment.mjs';
 import { createUpdateArchive } from './updater.mjs';
 
@@ -49,9 +49,7 @@ try {
     await mkdir(extracted);
     execFileSync('tar', ['-xzf', archive, '-C', extracted], { stdio: 'inherit' });
     const extractedApp = join(extracted, 'timi.app');
-    execFileSync('codesign', ['--verify', '--deep', '--strict', extractedApp], { stdio: 'inherit' });
-    execFileSync('xcrun', ['stapler', 'validate', extractedApp], { stdio: 'inherit' });
-    execFileSync('spctl', ['--assess', '--type', 'execute', '--verbose=2', extractedApp], { stdio: 'inherit' });
+    await verifyPackagedApp(extractedApp);
     for (const name of ['timi-mac-universal.app.tar.gz', 'timi-mac-universal.app.tar.gz.sig', 'latest.json']) {
       await cp(join(staging, name), resolve('release', name));
     }
