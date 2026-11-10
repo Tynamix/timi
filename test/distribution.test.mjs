@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, readFile, readlink, rm, stat, writeFile } from 'node:fs
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
-import { createDmg, signingOptions, verifySigning } from '../scripts/distribution.mjs';
+import { createDmg, signingOptions, verifyPackagedApp, verifySigning } from '../scripts/distribution.mjs';
 
 const teamId = 'A123456789';
 const hash = 'a'.repeat(40);
@@ -234,6 +234,105 @@ test('ticket-service failures retry stapling and validation for the app and DMG 
         assert.equal(await readFile(options.outputPath, 'utf8'), 'new disk image');
       });
     }
+  }
+});
+
+test('busy DMG creation retries only creation, removes partial images and verifies before replacement', async t => {
+  const options = { ...await fixture(t), signing };
+  const { calls, run } = commands();
+  const waits = [];
+  t.mock.method(console, 'warn', () => {});
+  let attempts = 0;
+  await createDmg(options, (command, args, commandOptions) => {
+    if (command === 'hdiutil' && args[0] === 'create') {
+      assert.equal(commandOptions.env.LC_ALL, 'C');
+      assert.deepEqual(commandOptions.stdio, ['ignore', 'inherit', 'pipe']);
+      assert.equal(commandOptions.encoding, 'utf8');
+      assert.throws(() => readFileSync(args.at(-1)), { code: 'ENOENT' });
+      attempts++;
+      if (attempts <= 3) {
+        writeFileSync(args.at(-1), 'partial disk image');
+        throw Object.assign(new Error('hdiutil failed'), { status: 1, stderr: Buffer.from('hdiutil: create failed - Resource busy\n') });
+      }
+    }
+    return run(command, args);
+  }, async milliseconds => {
+    waits.push(milliseconds);
+    assert.equal(await readFile(options.outputPath, 'utf8'), 'previous release');
+  });
+  assert.equal(attempts, 4);
+  assert.deepEqual(waits, [10_000, 20_000, 40_000]);
+  assert.equal(calls.filter(call => call[1] === 'notarytool' && call[2] === 'submit').length, 2);
+  assert.equal(calls.filter(call => call[0] === 'hdiutil' && call[1] === 'verify').length, 1);
+  assert.equal(await readFile(options.outputPath, 'utf8'), 'new disk image');
+});
+
+test('persistent busy resources and permanent image errors abort without replacing the previous DMG', async t => {
+  for (const [status, diagnostic, expectedAttempts] of [
+    [1, 'hdiutil: create failed - Resource busy\n', 4],
+    [1, 'hdiutil: create failed - No space left on device\n', 1],
+    [1, '', 1],
+    [null, 'hdiutil: create failed - Resource busy\n', 1],
+  ]) {
+    await t.test(`${status}: ${diagnostic || 'no diagnostic'}`, async t => {
+      const options = await fixture(t);
+      const { calls, run } = commands();
+      const waits = [];
+      let attempts = 0;
+      t.mock.method(console, 'warn', () => {});
+      const failure = Object.assign(new Error('image creation failed'), { status, stderr: diagnostic });
+      await assert.rejects(createDmg(options, (command, args) => {
+        if (command === 'hdiutil' && args[0] === 'create') {
+          attempts++;
+          writeFileSync(args.at(-1), 'partial image');
+          throw failure;
+        }
+        return run(command, args);
+      }, async milliseconds => { waits.push(milliseconds); }), error => error === failure);
+      assert.equal(attempts, expectedAttempts);
+      assert.deepEqual(waits, expectedAttempts === 4 ? [10_000, 20_000, 40_000] : []);
+      assert.equal(await readFile(options.outputPath, 'utf8'), 'previous release');
+      assert.equal(calls.some(call => call[0] === 'hdiutil' && call[1] === 'verify'), false);
+    });
+  }
+});
+
+test('extracted updater app retries ticket validation without repeating signature checks or notarization', async t => {
+  const appPath = '/staging/update-check/timi.app';
+  const calls = [];
+  const waits = [];
+  let attempts = 0;
+  t.mock.method(console, 'warn', () => {});
+  await verifyPackagedApp(appPath, (command, args) => {
+    calls.push([command, ...args]);
+    if (command === 'xcrun' && ++attempts <= 3) throw Object.assign(new Error('connection lost'), { status: 68 });
+  }, async milliseconds => { waits.push(milliseconds); });
+  assert.equal(attempts, 4);
+  assert.deepEqual(waits, [10_000, 20_000, 40_000]);
+  assert.deepEqual(calls, [
+    ['codesign', '--verify', '--deep', '--strict', appPath],
+    ...Array.from({ length: 4 }, () => ['xcrun', 'stapler', 'validate', appPath]),
+    ['spctl', '--assess', '--type', 'execute', '--verbose=2', appPath],
+  ]);
+});
+
+test('extracted updater verification propagates persistent ticket, signature and Gatekeeper failures', async t => {
+  for (const [phase, status, expectedAttempts] of [['xcrun', 68, 4], ['xcrun', 65, 1], ['codesign', 1, 1], ['spctl', 1, 1]]) {
+    await t.test(`${phase}: ${status}`, async t => {
+      const calls = [];
+      const waits = [];
+      let attempts = 0;
+      const failure = Object.assign(new Error('verification failed'), { status });
+      t.mock.method(console, 'warn', () => {});
+      await assert.rejects(verifyPackagedApp('/staging/update-check/timi.app', (command, args) => {
+        calls.push([command, ...args]);
+        if (command === phase) { attempts++; throw failure; }
+      }, async milliseconds => { waits.push(milliseconds); }), error => error === failure);
+      assert.equal(attempts, expectedAttempts);
+      assert.deepEqual(waits, status === 68 ? [10_000, 20_000, 40_000] : []);
+      if (phase !== 'spctl') assert.equal(calls.some(call => call[0] === 'spctl'), false);
+      if (phase === 'codesign') assert.equal(calls.length, 1);
+    });
   }
 });
 
